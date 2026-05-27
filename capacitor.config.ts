@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'OMT Pulse',
   webDir: 'dist/public',
   server: {
-    url: 'https://omtpulse.com',
+    url: 'https://omtpulse.com/login',
     cleartext: false,
   },
   plugins: {
