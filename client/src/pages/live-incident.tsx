@@ -1836,7 +1836,6 @@ export default function LiveIncidentPage() {
     if (mapInstanceRef.current && mapsReady) {
       if (navMode) {
         mapInstanceRef.current.setOptions({ minZoom: 15 });
-        mapInstanceRef.current.setTilt(45);
         mapInstanceRef.current.setZoom(17);
         // Apply any already-known heading immediately — don't wait for the next GPS tick.
         mapInstanceRef.current.setHeading(lastHeadingRef.current ?? 0);
@@ -1869,13 +1868,19 @@ export default function LiveIncidentPage() {
             }
           }
         }
+        // setTilt last — after zoom/heading/center so no subsequent camera op resets it
+        mapInstanceRef.current.setTilt(45);
       } else {
         mapInstanceRef.current.setOptions({ minZoom: undefined });
         mapInstanceRef.current.setTilt(0);
         mapInstanceRef.current.setHeading(0);
         lastHeadingRef.current = null;
       }
-      setTimeout(() => google.maps.event.trigger(mapInstanceRef.current!, "resize"), 80);
+      setTimeout(() => {
+        google.maps.event.trigger(mapInstanceRef.current!, "resize");
+        // Re-apply tilt after resize — the resize event can reset the camera on vector maps
+        if (navMode && mapInstanceRef.current) mapInstanceRef.current.setTilt(45);
+      }, 80);
     }
   }, [navMode, mapsReady]);
 
