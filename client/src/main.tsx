@@ -1,0 +1,54 @@
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
+// --- PWA blank-screen recovery ---
+// On Android, the OS can kill the PWA's WebView process while the user is in
+// another app (e.g. Google Maps navigation). When the user switches back via
+// the recents button, Android tries to restore the WebView. If the process was
+// killed, the page may start blank. We detect this and reload to the last known
+// URL so the user lands back where they were without needing a hard refresh.
+
+const ROOT_ID = "root";
+const RETURN_KEY = "omt_return_url";
+
+function getReturnUrl(): string {
+  try { return localStorage.getItem(RETURN_KEY) || "/"; } catch { return "/"; }
+}
+
+function clearReturnUrl(): void {
+  try { localStorage.removeItem(RETURN_KEY); } catch { /* ignore */ }
+}
+
+function isRootEmpty(): boolean {
+  const el = document.getElementById(ROOT_ID);
+  return !el || el.childNodes.length === 0;
+}
+
+// visibilitychange: fires when the user switches back to the PWA tab/window.
+// If the root is empty at that point the WebView was killed and re-created blank.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && isRootEmpty()) {
+    const url = getReturnUrl();
+    clearReturnUrl();
+    window.location.replace(url);
+  }
+});
+
+// pageshow with persisted=true: fires when the page is restored from the
+// bfcache (Android Chrome back/forward cache). The bfcache snapshot can be
+// stale; force a full reload to ensure the live-incident state is current.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && isRootEmpty()) {
+    clearReturnUrl();
+    window.location.reload();
+  }
+});
+
+createRoot(document.getElementById(ROOT_ID)!).render(<App />);

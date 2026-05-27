@@ -1,0 +1,25 @@
+uploads = []
+
+[[generated]]
+id = "FEiCLKWyhzSeQYEy-U-qD"
+uri = "file://client/public/icon-512.png"
+type = "image"
+title = "omt-pulse-icon-512"
+
+[[generated]]
+id = "qY12sVcZoKvG7RBiRs41C"
+uri = "file://client/public/icon-192.png"
+type = "image"
+title = "omt-pulse-icon-192"
+
+[[outputs]]
+id = "OL5-dNsATex1y8UOZJWOc"
+uri = "file://client/public/icon-512.png"
+type = "image"
+title = "OMT PWA Icon — from your image"
+
+[[outputs]]
+id = "okZ4-xrqlRc0-j-ljQwU9"
+uri = "file://client/public/og-image.png"
+type = "image"
+title = "Preview"

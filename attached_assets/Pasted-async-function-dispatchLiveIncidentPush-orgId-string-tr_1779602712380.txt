@@ -1,0 +1,59 @@
+async function dispatchLiveIncidentPush(orgId: string, triggerUserId: string, incident: Incident) {
+  // Severity notifications already fired at the moment of severity selection — skip.
+  if (incident.severity) return;
+
+  // IMPORTANT CHANGE: Do NOT restrict by command for urgent alerts.
+  // We want ALL active admins & supervisors in the org to receive live incidents/panic alerts,
+  // no matter who triggered it.
+  const subs = await storage.getPushSubscriptionsByOrg(orgId, triggerUserId, undefined, undefined);
+
+  if (subs.length === 0) return;
+
+  const reporter = await storage.getUserById(triggerUserId);
+  const fullName = reporter ? `${reporter.firstName} ${reporter.lastName}`.trim() : "A user";
+
+  const title = `🚨 Live Incident — ${fullName}`;
+  const locPart = incident.liveStartLat != null && incident.liveStartLng != null
+    ? `${Number(incident.liveStartLat).toFixed(4)}, ${Number(incident.liveStartLng).toFixed(4)}`
+    : "Location being tracked";
+
+  const body = `Started at ${incident.incidentTime} · ${locPart} · Tap to respond`;
+
+  const payload = JSON.stringify({
+    type: "incident_started",
+    title,
+    body,
+    url: "/live-monitor"
+  });
+
+  await Promise.allSettled(
+    dedupeByUser(subs).map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+          URGENT_PUSH
+        );
+
+        storage.createNotificationLog({
+          organizationId: orgId,
+          userId: sub.userId,
+          title,
+          body,
+          url: "/live-monitor",
+          incidentId: incident.id,
+        }).catch(() => {});
+      } catch (err: unknown) {
+        const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+          ? (err as { statusCode: number }).statusCode
+          : 0;
+
+        if (statusCode === 410 || statusCode === 404) {
+          await storage.deletePushSubscription(sub.endpoint);
+        } else {
+          console.error("[push] send failed (status=%d):", statusCode, err instanceof Error ? err.message : err);
+        }
+      }
+    })
+  );
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "899137752500",
+    "project_id": "intelafri-omtpulse",
+    "storage_bucket": "intelafri-omtpulse.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:899137752500:android:b3eb5de6d255f3d5bef6e1",
+        "android_client_info": {
+          "package_name": "com.intelafri.omtpulse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAxjg5HbWPNYjI_SxDtvh2oHWFp0Ouyrpw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

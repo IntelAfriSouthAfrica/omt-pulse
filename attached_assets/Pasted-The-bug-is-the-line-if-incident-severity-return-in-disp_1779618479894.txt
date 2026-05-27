@@ -1,0 +1,63 @@
+The bug is the line `if (incident.severity) return;` in dispatchLiveIncidentPush.
+
+This line silently kills the push when a reporter starts a live incident with a pre-selected severity.
+
+Replace the entire dispatchLiveIncidentPush function with this version (it removes the severity guard but keeps everything else identical):
+
+```ts
+async function dispatchLiveIncidentPush(orgId: string, triggerUserId: string, incident: Incident) {
+  // Severity notifications already fired at the moment of severity selection — skip.
+  // NOTE: We removed the early return because it was blocking normal live-incident pushes from reporters.
+
+  const subs = await storage.getPushSubscriptionsByOrg(orgId, triggerUserId, undefined, undefined);
+
+  if (subs.length === 0) return;
+
+  const reporter = await storage.getUserById(triggerUserId);
+  const fullName = reporter ? `${reporter.firstName} ${reporter.lastName}`.trim() : "A user";
+
+  const title = `🚨 Live Incident — ${fullName}`;
+  const locPart = incident.liveStartLat != null && incident.liveStartLng != null
+    ? `${Number(incident.liveStartLat).toFixed(4)}, ${Number(incident.liveStartLng).toFixed(4)}`
+    : "Location being tracked";
+
+  const body = `Started at ${incident.incidentTime} · ${locPart} · Tap to respond`;
+
+  const payload = JSON.stringify({
+    type: "incident_started",
+    title,
+    body,
+    url: "/live-monitor"
+  });
+
+  await Promise.allSettled(
+    dedupeByUser(subs).map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+          URGENT_PUSH
+        );
+
+        storage.createNotificationLog({
+          organizationId: orgId,
+          userId: sub.userId,
+          title,
+          body,
+          url: "/live-monitor",
+          incidentId: incident.id,
+        }).catch(() => {});
+      } catch (err: unknown) {
+        const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+          ? (err as { statusCode: number }).statusCode
+          : 0;
+
+        if (statusCode === 410 || statusCode === 404) {
+          await storage.deletePushSubscription(sub.endpoint);
+        } else {
+          console.error("[push] send failed (status=%d):", statusCode, err instanceof Error ? err.message : err);
+        }
+      }
+    })
+  );
+}
