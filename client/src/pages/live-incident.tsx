@@ -1170,6 +1170,10 @@ export default function LiveIncidentPage() {
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,
+      rotateControl: false,
+      gestureHandling: "greedy",
+      zoomControl: true,
+      zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
     });
     mapInstanceRef.current = map;
     geocoderRef.current = new google.maps.Geocoder();
@@ -1177,7 +1181,7 @@ export default function LiveIncidentPage() {
 
     const renderer = new google.maps.DirectionsRenderer({
       suppressMarkers: true,
-      polylineOptions: { strokeColor: "#ef4444", strokeWeight: 5, strokeOpacity: 0.9 },
+      polylineOptions: { strokeColor: "#4285F4", strokeWeight: 7, strokeOpacity: 0.95 },
     });
     renderer.setMap(map);
     directionsRendererRef.current = renderer;
@@ -1827,6 +1831,7 @@ export default function LiveIncidentPage() {
     if (mapInstanceRef.current && mapsReady) {
       if (navMode) {
         mapInstanceRef.current.setOptions({ minZoom: 15 });
+        mapInstanceRef.current.setMapTypeId("hybrid");
         mapInstanceRef.current.setTilt(45);
         mapInstanceRef.current.setZoom(17);
         // Apply any already-known heading immediately — don't wait for the next GPS tick.
@@ -1862,6 +1867,7 @@ export default function LiveIncidentPage() {
         }
       } else {
         mapInstanceRef.current.setOptions({ minZoom: undefined });
+        mapInstanceRef.current.setMapTypeId("roadmap");
         mapInstanceRef.current.setTilt(0);
         mapInstanceRef.current.setHeading(0);
         lastHeadingRef.current = null;
