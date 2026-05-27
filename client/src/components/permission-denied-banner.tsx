@@ -1,7 +1,6 @@
 import { AlertTriangle, MapPin, HelpCircle, Navigation } from "lucide-react";
 import { usePermissionStatus } from "@/hooks/use-permission-status";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
 
 type Platform = "ios" | "android" | "desktop";
 
@@ -20,7 +19,7 @@ const PLATFORM_INSTRUCTIONS: Record<Platform, { location: string }> = {
   },
   android: {
     location:
-      "Settings → Apps → Chrome (or your browser) → Permissions → Location → Allow.",
+      "Settings → Apps → OMT Pulse → Permissions → Location → Allow.",
   },
   desktop: {
     location:
@@ -37,7 +36,17 @@ export function PermissionDeniedBanner() {
 
   function requestLocation() {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(() => {}, () => {}, { timeout: 10000 });
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        // Permission granted — notify the hook immediately so the banner clears
+        window.dispatchEvent(new Event("omt:location-granted"));
+      },
+      () => {
+        // Denied or error — the permission change event / next visibilitychange
+        // will update the status naturally
+      },
+      { timeout: 15000, enableHighAccuracy: true }
+    );
   }
 
   // ── Denied banner — persistent, no dismiss ─────────────────────────────────

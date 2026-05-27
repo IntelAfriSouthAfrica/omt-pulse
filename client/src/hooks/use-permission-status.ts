@@ -19,6 +19,30 @@ const isPermissionsSupported =
   window.isSecureContext &&
   !!navigator.permissions;
 
+// Probe actual geolocation access — more reliable than the Permissions API
+// in Capacitor WebView where navigator.permissions may lag or lie.
+function probeGeolocation(): Promise<PermissionState> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve("unsupported");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      () => resolve("granted"),
+      (err) => {
+        if (err.code === 1 /* PERMISSION_DENIED */) {
+          resolve("denied");
+        } else {
+          // POSITION_UNAVAILABLE or TIMEOUT — permission was granted but GPS
+          // couldn't get a fix. Treat as granted so the banner clears.
+          resolve("granted");
+        }
+      },
+      { timeout: 4000, maximumAge: Infinity, enableHighAccuracy: false }
+    );
+  });
+}
+
 export function usePermissionStatus(): PermissionStatus {
   const [status, setStatus] = useState<PermissionStatus>({
     camera: "prompt",
@@ -35,11 +59,10 @@ export function usePermissionStatus(): PermissionStatus {
     let cancelled = false;
     const cleanups: Array<() => void> = [];
 
-    // Holds the resolved PermissionStatus objects so the visibilitychange
-    // handler can re-read their .state without re-querying.
     let resolvedResults: Array<{ key: keyof PermissionStatus; permStatus: globalThis.PermissionStatus | null }> = [];
 
-    (async () => {
+    async function checkAll() {
+      // 1. Query the Permissions API
       const results = await Promise.all(
         NAMES.map(async ({ key, name }) => {
           try {
@@ -52,16 +75,24 @@ export function usePermissionStatus(): PermissionStatus {
       );
 
       if (cancelled) return;
-
       resolvedResults = results;
 
       const initial: PermissionStatus = { camera: "prompt", microphone: "prompt", location: "prompt" };
       for (const { key, permStatus } of results) {
         initial[key] = permStatus ? (permStatus.state as PermissionState) : "unsupported";
       }
-      setStatus(initial);
 
-      // Listen for browser-level permission change events (Chrome/Android)
+      // 2. If Permissions API says location is "prompt", probe actual access.
+      //    Capacitor WebView often reports "prompt" even after the user has
+      //    already granted the native permission.
+      if (initial.location === "prompt") {
+        const probed = await probeGeolocation();
+        if (!cancelled) initial.location = probed;
+      }
+
+      if (!cancelled) setStatus(initial);
+
+      // 3. Listen for browser-level permission change events (Chrome/Android)
       for (const { key, permStatus } of results) {
         if (!permStatus) continue;
         const handler = () => {
@@ -73,21 +104,34 @@ export function usePermissionStatus(): PermissionStatus {
         cleanups.push(() => permStatus.removeEventListener("change", handler));
       }
 
-      // Visibility-change fallback — iOS Safari does NOT fire the `change`
-      // event on PermissionStatus objects when the user toggles a permission
-      // in Settings and returns to the app. Re-reading .state on every app
-      // foreground covers this gap for all platforms.
-      const onVisibility = () => {
+      // 4. Visibility-change fallback — re-probe on every app foreground.
+      //    Capacitor on Android doesn't fire the Permissions `change` event
+      //    after the native dialog closes, so we re-probe here.
+      const onVisibility = async () => {
         if (cancelled || document.visibilityState !== "visible") return;
         const updated: PermissionStatus = { camera: "prompt", microphone: "prompt", location: "prompt" };
         for (const { key, permStatus } of resolvedResults) {
           updated[key] = permStatus ? (permStatus.state as PermissionState) : "unsupported";
         }
-        setStatus(updated);
+        // Always re-probe actual geolocation on foreground in case native
+        // permission was granted/revoked while the app was backgrounded.
+        const probed = await probeGeolocation();
+        if (!cancelled) updated.location = probed;
+        if (!cancelled) setStatus(updated);
       };
       document.addEventListener("visibilitychange", onVisibility);
       cleanups.push(() => document.removeEventListener("visibilitychange", onVisibility));
-    })();
+
+      // 5. Listen for the custom event fired by the Allow button after a
+      //    successful getCurrentPosition call.
+      const onGranted = () => {
+        if (!cancelled) setStatus((prev) => ({ ...prev, location: "granted" }));
+      };
+      window.addEventListener("omt:location-granted", onGranted);
+      cleanups.push(() => window.removeEventListener("omt:location-granted", onGranted));
+    }
+
+    checkAll();
 
     return () => {
       cancelled = true;
