@@ -75,6 +75,8 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
   const heatmapMapRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<L.Map | null>(null);
   const leafletHeatRef = useRef<L.HeatLayer | null>(null);
+  const userInteractedRef = useRef(false);
+  const leafletUserInteractedRef = useRef(false);
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsError, setMapsError] = useState(false);
   const [mapMode, setMapMode] = useState<"markers" | "heatmap">("markers");
@@ -138,7 +140,7 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
 
   useEffect(() => {
     if (!mapsReady || !mapRef.current || mapInstanceRef.current) return;
-    mapInstanceRef.current = new google.maps.Map(mapRef.current, {
+    const gmap = new google.maps.Map(mapRef.current, {
       center: { lat: -26.2041, lng: 28.0473 },
       zoom: 6,
       mapTypeControl: true,
@@ -150,6 +152,9 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
       streetViewControl: false,
       fullscreenControl: true,
     });
+    mapInstanceRef.current = gmap;
+    gmap.addListener("dragend", () => { userInteractedRef.current = true; });
+    gmap.addListener("zoom_changed", () => { userInteractedRef.current = true; });
   }, [mapsReady]);
 
   useEffect(() => {
@@ -224,7 +229,7 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
       ...(showLocations ? geoLocations.map((loc) => ({ lat: loc.latitude!, lng: loc.longitude! })) : []),
       ...incidentCoords,
     ];
-    if (allCoords.length > 0) {
+    if (allCoords.length > 0 && !userInteractedRef.current) {
       const bounds = new google.maps.LatLngBounds();
       allCoords.forEach((c) => bounds.extend(c));
       map.fitBounds(bounds, 50);
@@ -246,6 +251,7 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
         maxZoom: 19,
       }).addTo(lmap);
       leafletMapRef.current = lmap;
+      lmap.on("dragend zoomend", () => { leafletUserInteractedRef.current = true; });
     }
     // Re-measure after display:none → display:block transition
     setTimeout(() => leafletMapRef.current?.invalidateSize(), 60);
@@ -272,7 +278,7 @@ function MapPanel({ incidents, categories, locations, customMaps }: {
       leafletHeatRef.current.redraw();
     }
 
-    if (points.length > 0) {
+    if (points.length > 0 && !leafletUserInteractedRef.current) {
       const bounds = L.latLngBounds(points.map((p) => L.latLng(p[0], p[1])));
       leafletMapRef.current.fitBounds(bounds, { padding: [50, 50] });
     }

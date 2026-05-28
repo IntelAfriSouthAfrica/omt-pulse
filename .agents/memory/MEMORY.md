@@ -4,3 +4,4 @@
 - [Capacitor Google Maps native setup](capacitor-maps-native.md) — WebView must be transparent in MainActivity.java; JS API services unavailable on native; GCP APIs needed; autostart redirect race fix
 - [Android nav-mode tilt](nav-mode-tilt-android.md) — setCamera animate:false uses Kotlin moveCamera which silently drops tilt; must use animate:true for any tilted camera position
 - [Android Google Maps renderer](android-maps-renderer.md) — LATEST/LEGACY renderer choice; LEGACY silently ignores tilt; Play Services can silently fall back; needs UI indicator to verify on-device
+- [Live-incident diagnostics removal](live-incident-diagnostics.md) — debug overlay + {false && ...} dead GPS row to be removed once nav mode is polished; user reminder to do this before final release.
