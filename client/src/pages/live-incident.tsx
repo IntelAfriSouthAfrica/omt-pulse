@@ -222,6 +222,8 @@ export default function LiveIncidentPage() {
   const [nativeRenderer, setNativeRenderer] = useState<string | null>(null);
   const [nativeMapCreateAt, setNativeMapCreateAt] = useState<number | null>(null);
   const [nativeMapReadyAt, setNativeMapReadyAt] = useState<number | null>(null);
+  const [cameraTilt, setCameraTilt] = useState<number | null>(null);
+  const [cameraZoom, setCameraZoom] = useState<number | null>(null);
   const [debugErrors, setDebugErrors] = useState<string[]>([]);
   const [debugVisible, setDebugVisible] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -2631,6 +2633,8 @@ export default function LiveIncidentPage() {
           nativeMapReadyAt,
           useWebMap,
           errors: debugErrors,
+          cameraTilt,
+          cameraZoom,
         } satisfies MapDebugSnapshot}
       />
 
@@ -3176,6 +3180,7 @@ export default function LiveIncidentPage() {
                   setNativeMapFailed(true);
                 }}
                 onRendererKnown={(r) => setNativeRenderer(r)}
+                onCameraIdle={(d) => { setCameraTilt(d.tilt); setCameraZoom(d.zoom); }}
               />
             ) : (
               <div ref={mapRef} className="absolute inset-0" data-testid="map-live" />

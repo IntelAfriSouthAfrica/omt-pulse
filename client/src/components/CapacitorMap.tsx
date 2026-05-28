@@ -105,6 +105,8 @@ interface CapacitorMapProps {
   onError?: (err: unknown) => void;
   /** Called once after map ready with the actual Maps SDK renderer name ("LATEST", "LEGACY", or "unknown"). */
   onRendererKnown?: (renderer: string) => void;
+  /** Called every time the camera settles with the actual tilt/zoom/bearing reported by the SDK. */
+  onCameraIdle?: (data: { tilt: number; zoom: number; bearing: number }) => void;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -149,7 +151,7 @@ function zoomFromBounds(
 
 const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
   ({ apiKey, initialCenter = { lat: -26.2041, lng: 28.0473 }, initialZoom = 6,
-     className, style, onReady, onError, onRendererKnown }, ref) => {
+     className, style, onReady, onError, onRendererKnown, onCameraIdle }, ref) => {
 
     const elementRef = useRef<HTMLDivElement>(null);
     const mapRef     = useRef<GoogleMap | null>(null);
@@ -201,6 +203,18 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
           NativeMapsPlugin.getRenderer()
             .then(({ renderer }) => onRendererKnown(renderer))
             .catch(() => onRendererKnown('unknown'));
+        }
+        // Subscribe to camera idle events so the caller can read back the
+        // ACTUAL tilt/zoom/bearing the SDK applied (vs what we sent).
+        // This is the definitive diagnostic for "is tilt being accepted?".
+        if (onCameraIdle) {
+          map.setOnCameraIdleListener((data) => {
+            onCameraIdle({
+              tilt:    typeof data.tilt    === 'number' ? data.tilt    : 0,
+              zoom:    typeof data.zoom    === 'number' ? data.zoom    : 0,
+              bearing: typeof data.bearing === 'number' ? data.bearing : 0,
+            });
+          }).catch(() => {});
         }
       })().catch((err) => {
         clearTimeout(timeoutId);
@@ -397,19 +411,21 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
           while (pendingUserPosRef.current) {
             const next = pendingUserPosRef.current;
             pendingUserPosRef.current = null;
-            if (userMarkerIdRef.current) {
-              const idToRemove = userMarkerIdRef.current;
-              userMarkerIdRef.current = ''; // clear FIRST so nothing else sees the stale id
-              await map.removeMarker(idToRemove).catch((e) => reportNativeError('setUserLocation:removeMarker', e));
-            }
+            // ADD the new marker FIRST, then remove the old one.
+            // The previous order (remove → add) left a gap where no marker
+            // existed, causing a visible flicker on every GPS update.
+            // Swapping the order keeps the marker always visible.
             const ids = await map.addMarkers([{
               coordinate: { lat: next.lat, lng: next.lng },
               title: 'You',
-              // Google blue, fully opaque
               tintColor: { r: 66, g: 133, b: 244, a: 255 },
               zIndex: 100,
             }]).catch((e) => { reportNativeError('setUserLocation:addMarkers', e); return [] as string[]; });
+            const idToRemove = userMarkerIdRef.current;
             userMarkerIdRef.current = ids[0] ?? '';
+            if (idToRemove) {
+              await map.removeMarker(idToRemove).catch((e) => reportNativeError('setUserLocation:removeMarker', e));
+            }
           }
         } finally {
           userMarkerBusyRef.current = false;

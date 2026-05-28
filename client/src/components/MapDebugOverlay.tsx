@@ -13,6 +13,10 @@ export interface MapDebugSnapshot {
   nativeMapReadyAt: number | null;
   useWebMap: boolean;
   errors: string[];
+  /** Actual camera tilt reported by onCameraIdle — null until first idle event */
+  cameraTilt: number | null;
+  /** Actual camera zoom reported by onCameraIdle */
+  cameraZoom: number | null;
 }
 
 interface Props {
@@ -59,6 +63,8 @@ export default function MapDebugOverlay({ snapshot, visible, onClose }: Props) {
     `Map rendering:   ${snapshot.useWebMap ? "web fallback" : "native"}`,
     `Native create:   ${snapshot.nativeMapCreateAt ? new Date(snapshot.nativeMapCreateAt).toLocaleTimeString() : "—"}`,
     `Native ready:    ${snapshot.nativeMapReadyAt ? new Date(snapshot.nativeMapReadyAt).toLocaleTimeString() : "—"}`,
+    `Camera tilt:     ${snapshot.cameraTilt != null ? snapshot.cameraTilt.toFixed(1) + "deg" : "—"}`,
+    `Camera zoom:     ${snapshot.cameraZoom != null ? snapshot.cameraZoom.toFixed(1) : "—"}`,
     `URL:             ${typeof window !== "undefined" ? window.location.href : "?"}`,
     `UA:              ${typeof navigator !== "undefined" ? navigator.userAgent : "?"}`,
     "",
