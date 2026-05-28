@@ -1460,7 +1460,12 @@ export default function LiveIncidentPage() {
     if (autoResumedNavRef.current) return;
     if (navMode) return;
     if (!navStarted) return;
-    if ((!mapsReady && nativeMapStatus !== "ready") || !currentIncident) return;
+    // On native: capMapRef is only usable once nativeMapStatus === "ready".
+    // Proceeding on mapsReady alone (JS API loaded but native map not yet ready)
+    // causes drawRoute to fail silently, sets autoResumedNavRef=true, then the
+    // native-ready re-trigger is permanently blocked by the guard.
+    const mapActuallyReady = isNative ? nativeMapStatus === "ready" : mapsReady;
+    if (!mapActuallyReady || !currentIncident) return;
     const dlat = currentIncident.destinationLat != null
       ? Number(currentIncident.destinationLat)
       : (currentIncident.latitude ?? null);
@@ -1473,7 +1478,8 @@ export default function LiveIncidentPage() {
     (async () => {
       if (stepsRef.current.length === 0) {
         drawRoute(Number(dlat), Number(dlng), lastPosRef.current ?? undefined, true);
-        if (isNative) await new Promise((r) => setTimeout(r, 600));
+        // Give the native routing call time to resolve before entering nav mode.
+        if (isNative) await new Promise((r) => setTimeout(r, 1500));
       }
       setNavMode(true);
     })();
