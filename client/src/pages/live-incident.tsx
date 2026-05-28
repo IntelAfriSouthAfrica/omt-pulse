@@ -3277,7 +3277,7 @@ export default function LiveIncidentPage() {
                   setMapType(next as "Normal" | "Hybrid" | "Satellite");
                   capMapRef.current?.setMapType(next as "Normal" | "Hybrid" | "Satellite").catch(() => {});
                 }}
-                className="absolute right-3 top-3 z-20 h-10 w-10 rounded-full bg-background/90 backdrop-blur border shadow-lg flex items-center justify-center text-foreground hover:bg-accent active:scale-95 transition-transform"
+                className={`absolute right-3 z-20 h-10 w-10 rounded-full bg-background/90 backdrop-blur border shadow-lg flex items-center justify-center text-foreground hover:bg-accent active:scale-95 transition-transform ${navMode ? "top-[8.5rem]" : "top-3"}`}
                 aria-label={`Map view: ${mapType} — tap to cycle`}
                 title={`Map: ${mapType} (tap to cycle)`}
                 data-testid="button-map-type-toggle"

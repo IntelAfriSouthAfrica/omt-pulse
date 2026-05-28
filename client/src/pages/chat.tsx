@@ -384,7 +384,7 @@ export default function ChatPage() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 -ml-1 mr-0.5"
-                onClick={() => navigate("/")}
+                onClick={() => window.history.back()}
                 data-testid="button-chat-back"
               >
                 <ArrowLeft className="h-4 w-4" />
