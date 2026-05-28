@@ -1492,9 +1492,28 @@ export default function LiveIncidentPage() {
     setSearch(val);
     if (searchDebRef.current) clearTimeout(searchDebRef.current);
     if (!val.trim()) { setSuggestions([]); return; }
-    searchDebRef.current = setTimeout(() => {
-      if (!autocompleteRef.current) return;
+    searchDebRef.current = setTimeout(async () => {
       setLoadingSugg(true);
+      if (isNative) {
+        // Native: google.maps JS API is not loaded — use Places Autocomplete REST API
+        try {
+          const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
+          const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(val)}&components=country:za&key=${apiKey}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          setLoadingSugg(false);
+          if (data.status === 'OK' && data.predictions) {
+            setSuggestions(data.predictions.slice(0, 5).map((p: any) => ({ place_id: p.place_id, description: p.description })));
+          } else {
+            setSuggestions([]);
+          }
+        } catch {
+          setLoadingSugg(false);
+          setSuggestions([]);
+        }
+        return;
+      }
+      if (!autocompleteRef.current) { setLoadingSugg(false); return; }
       autocompleteRef.current.getPlacePredictions(
         { input: val, componentRestrictions: { country: "za" } },
         (preds, status) => {
@@ -1507,41 +1526,56 @@ export default function LiveIncidentPage() {
         }
       );
     }, 350);
-  }, []);
+  }, [isNative]);
 
   function selectPlace(s: PlaceSuggestion) {
     setSearch(s.description);
     setSuggestions([]);
+
+    const commitDestination = (lat: number, lng: number) => {
+      setDestination({ lat, lng, name: s.description });
+      drawRoute(lat, lng);
+      // Save destination to server immediately so Live Monitor reflects it
+      // within the next 5-second poll — not only when the user taps Navigate.
+      const incId = currentIncidentId;
+      if (incId) {
+        const path = isJoinerMode ? "joiner-destination" : "destination";
+        apiRequest("PATCH", `/api/incidents/${incId}/${path}`, {
+          destinationName: s.description,
+          destinationLat: lat,
+          destinationLng: lng,
+        }).catch((err) => {
+          console.warn(`[destination] PATCH /${path} failed for incident ${incId}`, err);
+          toast({
+            title: "Destination not shared",
+            description: "Your destination is set locally but couldn't be sent to the team. Tap a destination again to retry.",
+            variant: "destructive",
+          });
+        });
+      }
+    };
+
+    if (isNative) {
+      // Native: google.maps JS API is not loaded — use Geocoding REST API
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '';
+      fetch(`https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(s.place_id)}&key=${apiKey}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.status === 'OK' && data.results?.[0]) {
+            const loc = data.results[0].geometry.location;
+            commitDestination(loc.lat, loc.lng);
+          }
+        })
+        .catch((err) => console.warn('[selectPlace] geocode REST failed', err));
+      return;
+    }
+
     geocoderRef.current?.geocode(
       { placeId: s.place_id },
       (results, status) => {
         if (status !== google.maps.GeocoderStatus.OK || !results?.[0]) return;
         const loc = results[0].geometry.location;
-        const lat = loc.lat();
-        const lng = loc.lng();
-        setDestination({ lat, lng, name: s.description });
-        drawRoute(lat, lng);
-        // Save destination to server immediately so Live Monitor reflects it
-        // within the next 5-second poll — not only when the user taps Navigate.
-        const incId = currentIncidentId;
-        if (incId) {
-          const path = isJoinerMode ? "joiner-destination" : "destination";
-          apiRequest("PATCH", `/api/incidents/${incId}/${path}`, {
-            destinationName: s.description,
-            destinationLat: lat,
-            destinationLng: lng,
-          }).catch((err) => {
-            // Don't silently swallow — Nicolaas's destination was lost this way.
-            // Surface the failure so the user knows their destination didn't
-            // reach the team and can retry.
-            console.warn(`[destination] PATCH /${path} failed for incident ${incId}`, err);
-            toast({
-              title: "Destination not shared",
-              description: "Your destination is set locally but couldn't be sent to the team. Tap a destination again to retry.",
-              variant: "destructive",
-            });
-          });
-        }
+        commitDestination(loc.lat(), loc.lng());
       }
     );
   }
