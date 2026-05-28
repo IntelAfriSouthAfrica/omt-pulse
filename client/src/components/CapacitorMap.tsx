@@ -305,43 +305,89 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
           polyIdsRef.current = [];
         }
 
-        // Ask the JS-API DirectionsService for a driving route
+        // Ask the JS-API DirectionsService for a driving route. On any non-OK
+        // status we THROW so the caller can surface a visible toast — previously
+        // every failure was silently swallowed, producing a misleading straight
+        // line drawn from origin→destination markers only.
         const ds = new google.maps.DirectionsService();
-        const result = await new Promise<google.maps.DirectionsResult | null>((resolve) => {
+        const { result, status } = await new Promise<{
+          result: google.maps.DirectionsResult | null;
+          status: google.maps.DirectionsStatus;
+        }>((resolve) => {
           ds.route(
-            {
-              origin,
-              destination,
-              travelMode: google.maps.TravelMode.DRIVING,
-            },
-            (res, status) => {
-              if (status === google.maps.DirectionsStatus.OK && res) resolve(res);
-              else resolve(null);
-            },
+            { origin, destination, travelMode: google.maps.TravelMode.DRIVING },
+            (res, st) => resolve({ result: res ?? null, status: st }),
           );
         });
-        if (!result) return null;
+        if (status !== google.maps.DirectionsStatus.OK || !result) {
+          throw new Error(`DirectionsService:${status}`);
+        }
 
         const route = result.routes[0];
         const leg   = route?.legs?.[0];
-        if (!route || !leg) return null;
+        if (!route || !leg) throw new Error('DirectionsService:NO_ROUTE');
 
-        // overview_path is an array of google.maps.LatLng — convert to plain pairs
-        const path = (route.overview_path ?? []).map((ll) => ({
-          lat: ll.lat(),
-          lng: ll.lng(),
-        }));
+        // Prefer decoding the encoded polyline (`overview_polyline.points`)
+        // ourselves — the SDK-derived `overview_path` array has been observed
+        // returning just origin+destination inside Capacitor WebView, producing
+        // a straight diagonal line ignoring roads. The encoded string is the
+        // raw Maps API payload and decodes to the full road-following geometry.
+        const enc = (route as any).overview_polyline?.points
+          ?? (route as any).overview_polyline;
+        let path: Array<{ lat: number; lng: number }> = [];
+        const decodePath = (google.maps as any).geometry?.encoding?.decodePath;
+        if (typeof enc === 'string' && typeof decodePath === 'function') {
+          try {
+            path = decodePath(enc).map((ll: google.maps.LatLng) => ({
+              lat: ll.lat(), lng: ll.lng(),
+            }));
+          } catch (e) {
+            reportNativeError('drawRoute:decodePath', e);
+          }
+        }
+        // Fallback to overview_path if decode unavailable or failed.
+        if (path.length < 2) {
+          path = (route.overview_path ?? []).map((ll) => ({
+            lat: ll.lat(), lng: ll.lng(),
+          }));
+        }
         if (path.length < 2) return null;
+
+        // Diagnostic — single line per draw. adb logcat surfaces this verbatim
+        // and tells us in one screenshot whether the JS-side path is correct
+        // (then any visible straight line is bridge-side truncation) or not
+        // (then DirectionsService itself returned a degenerate path).
+        const first = path[0], last = path[path.length - 1];
+        console.log(
+          `[CapacitorMap.drawRoute] status=${status} points=${path.length} ` +
+          `first=${first.lat.toFixed(5)},${first.lng.toFixed(5)} ` +
+          `last=${last.lat.toFixed(5)},${last.lng.toFixed(5)}`
+        );
+
+        // Chunk long paths into ≤100-point polylines to defeat any
+        // JS→Kotlin bridge serialisation truncation on long routes. Each
+        // chunk overlaps by 1 point with the next so segments visually
+        // connect without gaps. Chunk IDs all tracked in polyIdsRef so
+        // the next draw removes every one of them cleanly.
+        // Max 100 points per chunk; advance by 99 so chunks overlap by 1 point
+        // and visually connect without gaps. Examples: length 100 → 1 chunk of
+        // 100; length 101 → 2 chunks (100 + 2); length 199 → 2 chunks (100 + 100).
+        const MAX = 100;
+        const STRIDE = MAX - 1;
+        const chunks: Array<Array<{ lat: number; lng: number }>> = [];
+        for (let i = 0; i < path.length - 1; i += STRIDE) {
+          chunks.push(path.slice(i, Math.min(i + MAX, path.length)));
+        }
 
         let ids: string[] = [];
         try {
-          ids = await map.addPolylines([{
-            path,
+          ids = await map.addPolylines(chunks.map((p) => ({
+            path: p,
             strokeColor:   '#4285F4',
             strokeWeight:  7,
             strokeOpacity: 0.95,
             zIndex: 1,
-          }]);
+          })));
         } catch (e) {
           reportNativeError('drawRoute:addPolylines', e);
         }

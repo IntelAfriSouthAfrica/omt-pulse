@@ -204,6 +204,9 @@ export default function LiveIncidentPage() {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const destPositionRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Cooldown for the "Could not compute driving route" toast — off-route
+  // reroutes can fire every few seconds, we don't want to spam the toast queue.
+  const lastDirectionsToastAtRef = useRef<number>(0);
   // Stable ref so the sendPosition closure inside startTracking() can check
   // isPanicIncident without stale-closure issues (React state is not readable
   // inside a watchPosition callback).
@@ -1722,7 +1725,24 @@ export default function LiveIncidentPage() {
           setCurrentStepIndex(0);
           setStepDist(result.steps[0]?.distance.value ?? null);
           setIsOffRoute(false);
-        }).catch(() => {});
+        }).catch((err) => {
+          // Surface DirectionsService failures so the responder sees why the
+          // route isn't drawing — previously silent, which made a missing
+          // polyline look like a straight-line bug. 30 s cooldown so repeated
+          // off-route reroutes don't spam the toast queue.
+          const msg = String(err?.message ?? err ?? '');
+          if (msg.startsWith('DirectionsService:')) {
+            const now = Date.now();
+            if (now - lastDirectionsToastAtRef.current > 30_000) {
+              lastDirectionsToastAtRef.current = now;
+              toast({
+                title: 'Could not compute driving route',
+                description: 'Tap Navigate again to retry.',
+                variant: 'destructive',
+              });
+            }
+          }
+        });
       return;
     }
     // ── Web path (JS API) — unchanged below ────────────────────────────────────
