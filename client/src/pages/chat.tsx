@@ -238,17 +238,14 @@ export default function ChatPage() {
     setUploadingImage(true);
     setShowAttachMenu(false);
     try {
-      const reqRes = await apiRequest("POST", "/api/uploads/request-url", {
-        name: file.name,
-        size: file.size,
-        contentType: file.type,
-      });
-      const { uploadURL, objectUrl } = await reqRes.json();
-      await fetch(uploadURL, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
+      const uploadResp = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        credentials: "include",
         body: file,
       });
+      if (!uploadResp.ok) throw new Error(`Upload failed: ${uploadResp.status}`);
+      const { url: objectUrl } = await uploadResp.json();
       const recipientId = activeConvo.type === "dm" ? activeConvo.recipientId : null;
       await apiRequest("POST", "/api/chat/messages", {
         recipientId,
