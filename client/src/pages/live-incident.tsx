@@ -160,6 +160,7 @@ export default function LiveIncidentPage() {
   const useWebMap = !isNative || nativeMapFailed;
   const capMapRef = useRef<CapacitorMapHandle | null>(null);
   const capDestMarkerIdRef = useRef<string>('');
+  const capOriginMarkerIdRef = useRef<string>('');
   // ────────────────────────────────────────────────────────────────────────────
   const originMarkerRef = useRef<google.maps.Marker | null>(null);
   const destMarkerRef = useRef<google.maps.Marker | null>(null);
@@ -1322,11 +1323,11 @@ export default function LiveIncidentPage() {
         setUserLoc(p);
         map.setCenter(p);
         map.setZoom(13);
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#3b82f6" stroke="white" stroke-width="2"/><circle cx="10" cy="10" r="4" fill="white" fill-opacity="0.85"/></svg>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 24 16 24S32 28 32 16C32 7.163 24.837 0 16 0z" fill="#006039" stroke="white" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" fill="white" font-family="sans-serif" font-size="14" font-weight="bold">A</text></svg>`;
         originMarkerRef.current = new google.maps.Marker({
           position: p,
           map,
-          icon: { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(20, 20), anchor: new google.maps.Point(10, 10) },
+          icon: { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(32, 40), anchor: new google.maps.Point(16, 40) },
           title: "Your location",
           zIndex: 100,
         });
@@ -1459,7 +1460,7 @@ export default function LiveIncidentPage() {
     if (autoResumedNavRef.current) return;
     if (navMode) return;
     if (!navStarted) return;
-    if (!mapsReady || !currentIncident) return;
+    if ((!mapsReady && nativeMapStatus !== "ready") || !currentIncident) return;
     const dlat = currentIncident.destinationLat != null
       ? Number(currentIncident.destinationLat)
       : (currentIncident.latitude ?? null);
@@ -1477,7 +1478,7 @@ export default function LiveIncidentPage() {
       setNavMode(true);
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navStarted, mapsReady, currentIncident?.id, navMode]);
+  }, [navStarted, mapsReady, nativeMapStatus, currentIncident?.id, navMode]);
 
   // Joiner GPS tracking — mirrors creator tracking useEffect
   useEffect(() => {
@@ -1697,10 +1698,19 @@ export default function LiveIncidentPage() {
         cap.removeMarker(capDestMarkerIdRef.current).catch(() => {});
         capDestMarkerIdRef.current = '';
       }
-      // tintColor intentionally omitted — the plugin needs {r,g,b,a} (0-255) and
-      // silently drops the marker when given a hex string. Default native pin is red.
-      cap.addMarker({ lat: dlat, lng: dlng, title: 'Destination' })
+      if (capOriginMarkerIdRef.current) {
+        cap.removeMarker(capOriginMarkerIdRef.current).catch(() => {});
+        capOriginMarkerIdRef.current = '';
+      }
+      // Destination — red tint
+      cap.addMarker({ lat: dlat, lng: dlng, title: 'B — Destination', tintColor: { r: 239, g: 68, b: 68, a: 255 } })
         .then(id => { capDestMarkerIdRef.current = id; }).catch(() => {});
+      // Origin / start — primary green tint. Use lastPosRef or userLoc as the start point.
+      const startPos = origin ?? lastPosRef.current ?? userLoc;
+      if (startPos) {
+        cap.addMarker({ lat: startPos.lat, lng: startPos.lng, title: 'A — Start', tintColor: { r: 0, g: 96, b: 57, a: 255 } })
+          .then(id => { capOriginMarkerIdRef.current = id; }).catch(() => {});
+      }
 
       const originToUse = origin ?? lastPosRef.current ?? userLoc;
       if (!originToUse) {
@@ -1728,11 +1738,11 @@ export default function LiveIncidentPage() {
     const effectiveSkip = skipFitBounds || navModeRef.current;
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null; }
     setRouteInfo(null);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#ef4444" stroke="white" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="white" fill-opacity="0.9"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 24 16 24S32 28 32 16C32 7.163 24.837 0 16 0z" fill="#ef4444" stroke="white" stroke-width="1.5"/><text x="16" y="21" text-anchor="middle" fill="white" font-family="sans-serif" font-size="14" font-weight="bold">B</text></svg>`;
     destMarkerRef.current = new google.maps.Marker({
       position: { lat: dlat, lng: dlng },
       map,
-      icon: { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(24, 24), anchor: new google.maps.Point(12, 12) },
+      icon: { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(32, 40), anchor: new google.maps.Point(16, 40) },
       title: "Destination",
       zIndex: 99,
     });
