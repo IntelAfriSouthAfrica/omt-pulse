@@ -2023,6 +2023,13 @@ export default function LiveIncidentPage() {
   // Keep navModeRef in sync so the step-tracking interval reads the latest value.
   useEffect(() => { navModeRef.current = navMode; }, [navMode]);
 
+  // Stop any in-flight voice utterance the moment nav mode is exited
+  // (X button, Arrived, incident close, leave, etc.). Guarantees no future
+  // nav-exit path leaks audio even if a new exit site is added later.
+  useEffect(() => {
+    if (!navMode) void stopSpeaking();
+  }, [navMode]);
+
   // Detect new joiners while in nav mode — flash their first name for 5 s.
   // Seeds the known-set silently on first render so pre-existing responders never trigger a flash.
   useEffect(() => {
@@ -3228,7 +3235,7 @@ export default function LiveIncidentPage() {
                     </p>
                   </div>
                   <button
-                    onClick={() => setNavMode(false)}
+                    onClick={() => { void stopSpeaking(); setNavMode(false); }}
                     className="shrink-0 p-2 rounded-full bg-white/20 hover:bg-white/30 transition-colors"
                     aria-label="Exit navigation"
                     data-testid="button-exit-nav"
@@ -3362,6 +3369,7 @@ export default function LiveIncidentPage() {
                   variant="destructive"
                   className="w-full font-bold"
                   onClick={() => {
+                    void stopSpeaking();
                     setNavMode(false);
                     arrivalTimeRef.current = new Date();
                     if (!isJoinerMode && currentIncident) {
