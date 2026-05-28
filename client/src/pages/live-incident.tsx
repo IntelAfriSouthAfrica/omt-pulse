@@ -219,6 +219,7 @@ export default function LiveIncidentPage() {
   const [autocompleteReady, setAutocompleteReady] = useState(false);
   const [nativeMapStatus, setNativeMapStatus] = useState<"idle" | "creating" | "ready" | "timeout" | "error">("idle");
   const [nativeMapErrorMsg, setNativeMapErrorMsg] = useState<string | null>(null);
+  const [nativeRenderer, setNativeRenderer] = useState<string | null>(null);
   const [nativeMapCreateAt, setNativeMapCreateAt] = useState<number | null>(null);
   const [nativeMapReadyAt, setNativeMapReadyAt] = useState<number | null>(null);
   const [debugErrors, setDebugErrors] = useState<string[]>([]);
@@ -2732,7 +2733,7 @@ export default function LiveIncidentPage() {
                   }`}
                   data-testid="badge-map-mode"
                 >
-                  {useWebMap ? "WEB MAP" : nativeMapStatus === "ready" ? "NATIVE" : nativeMapStatus.toUpperCase()}
+                  {useWebMap ? "WEB MAP" : nativeMapStatus === "ready" ? `NATIVE${nativeRenderer ? ` · ${nativeRenderer}` : ""}` : nativeMapStatus.toUpperCase()}
                 </span>
               )}
             </span>
@@ -2754,7 +2755,7 @@ export default function LiveIncidentPage() {
                   }`}
                   data-testid="badge-map-mode-stationary"
                 >
-                  {useWebMap ? "WEB MAP" : nativeMapStatus === "ready" ? "NATIVE" : nativeMapStatus.toUpperCase()}
+                  {useWebMap ? "WEB MAP" : nativeMapStatus === "ready" ? `NATIVE${nativeRenderer ? ` · ${nativeRenderer}` : ""}` : nativeMapStatus.toUpperCase()}
                 </span>
               )}
             </span>
@@ -3174,6 +3175,7 @@ export default function LiveIncidentPage() {
                   setNativeMapErrorMsg(msg);
                   setNativeMapFailed(true);
                 }}
+                onRendererKnown={(r) => setNativeRenderer(r)}
               />
             ) : (
               <div ref={mapRef} className="absolute inset-0" data-testid="map-live" />

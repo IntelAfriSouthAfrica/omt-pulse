@@ -13,6 +13,7 @@ const NativeMapsPlugin = registerPlugin<{
     zoomGestures?: boolean;
     scrollGestures?: boolean;
   }): Promise<void>;
+  getRenderer(): Promise<{ renderer: string }>;
 }>('CapacitorGoogleMaps');
 
 const NATIVE_MAP_ID = 'cap-live-map';
@@ -102,6 +103,8 @@ interface CapacitorMapProps {
   style?: React.CSSProperties;
   onReady?: () => void;
   onError?: (err: unknown) => void;
+  /** Called once after map ready with the actual Maps SDK renderer name ("LATEST", "LEGACY", or "unknown"). */
+  onRendererKnown?: (renderer: string) => void;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -146,7 +149,7 @@ function zoomFromBounds(
 
 const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
   ({ apiKey, initialCenter = { lat: -26.2041, lng: 28.0473 }, initialZoom = 6,
-     className, style, onReady, onError }, ref) => {
+     className, style, onReady, onError, onRendererKnown }, ref) => {
 
     const elementRef = useRef<HTMLDivElement>(null);
     const mapRef     = useRef<GoogleMap | null>(null);
@@ -192,6 +195,13 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
         clearTimeout(timeoutId);
         mapRef.current = map;
         onReady?.();
+        // Query the actual renderer chosen by the Maps SDK and surface it to
+        // the caller for on-screen diagnostics (no adb needed).
+        if (onRendererKnown) {
+          NativeMapsPlugin.getRenderer()
+            .then(({ renderer }) => onRendererKnown(renderer))
+            .catch(() => onRendererKnown('unknown'));
+        }
       })().catch((err) => {
         clearTimeout(timeoutId);
         console.error('[CapacitorMap] GoogleMap.create failed', err);
