@@ -306,8 +306,12 @@ html.capacitor-native #root {
 }
 html.capacitor-native .live-page-root,
 html.capacitor-native .live-scroll,
-html.capacitor-native .native-map-host,
-html.capacitor-native .native-map-host > div {
+html.capacitor-native .native-map-host {
+  background-color: transparent !important;
+}
+/* Only the actual map element itself — not its siblings (action bar,
+ * permission overlays) which carry their own opaque bg-background. */
+html.capacitor-native #cap-live-map {
   background-color: transparent !important;
 }
 
