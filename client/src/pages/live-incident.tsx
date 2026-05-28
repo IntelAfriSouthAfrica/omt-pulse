@@ -603,7 +603,13 @@ export default function LiveIncidentPage() {
         // ── Native camera + user marker ────────────────────────────────────────
         // Place/update the blue "you are here" dot on the native map. The
         // originMarkerRef above is a JS-API Marker and does nothing on native.
-        capMapRef.current.setUserLocation(p.lat, p.lng).catch(() => {});
+        // TEMP DIAGNOSTIC v66 — setUserLocation also disabled. v65 (only
+        // setCamera disabled) still had tilt snap-back AND blue marker
+        // flashing. Removing this addMarker churn isolates whether marker
+        // remove+add mutations are what's clobbering gesture-applied tilt
+        // on the native Android map. Tilt holds → marker churn is the
+        // culprit; tilt still snaps → plugin/WebView touch-listener.
+        if (false) capMapRef.current.setUserLocation(p.lat, p.lng).catch(() => {});
         const hdg = pos.coords.heading;
         if (hdg != null && !isNaN(hdg)) lastHeadingRef.current = hdg;
         // Retry route draw on first GPS fix — handles the race where drawRoute was
