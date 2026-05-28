@@ -154,6 +154,9 @@ export default function LiveIncidentPage() {
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   // ── Native map (Capacitor Android) ──────────────────────────────────────────
   const isNative = Capacitor.isNativePlatform();
+  const [nativeMapFailed, setNativeMapFailed] = useState(false);
+  // useWebMap = true whenever we should use the Google Maps JS API instead of Capacitor native
+  const useWebMap = !isNative || nativeMapFailed;
   const capMapRef = useRef<CapacitorMapHandle | null>(null);
   const capDestMarkerIdRef = useRef<string>('');
   // ────────────────────────────────────────────────────────────────────────────
@@ -1176,16 +1179,13 @@ export default function LiveIncidentPage() {
   }, [isOnline]);
 
   useEffect(() => {
-    if (isNative) {
-      setMapsReady(true); // native map doesn't need the JS API
-    } else {
-      loadGoogleMaps().then(() => setMapsReady(true)).catch(() => setMapsError(true));
-    }
+    // Always load the JS API — it's needed as fallback if native map fails
+    loadGoogleMaps().then(() => setMapsReady(true)).catch(() => setMapsError(true));
     return () => stopTracking();
   }, []);
 
   useEffect(() => {
-    if (isNative || !mapsReady || !mapRef.current || mapInstanceRef.current) return;
+    if (!useWebMap || !mapsReady || !mapRef.current || mapInstanceRef.current) return;
     const map = new google.maps.Map(mapRef.current, {
       center: { lat: -26.2041, lng: 28.0473 },
       zoom: 6,
@@ -1236,7 +1236,8 @@ export default function LiveIncidentPage() {
       () => {},
       { enableHighAccuracy: true, timeout: 8000 }
     );
-  }, [mapsReady]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapsReady, nativeMapFailed]);
 
   // Fallback: if localStorage was cleared (fresh app open), auto-detect this
   // user's active live incident from the server query and resume tracking.
@@ -2974,11 +2975,12 @@ export default function LiveIncidentPage() {
               </div>
             )}
 
-            {isNative ? (
+            {!useWebMap ? (
               <CapacitorMap
                 ref={capMapRef}
                 apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? ''}
                 className="absolute inset-0"
+                onError={() => setNativeMapFailed(true)}
               />
             ) : (
               <div ref={mapRef} className="absolute inset-0" data-testid="map-live" />

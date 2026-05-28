@@ -68,6 +68,7 @@ interface CapacitorMapProps {
   className?: string;
   style?: React.CSSProperties;
   onReady?: () => void;
+  onError?: (err: unknown) => void;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ function zoomFromBounds(
 
 const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
   ({ apiKey, initialCenter = { lat: -26.2041, lng: 28.0473 }, initialZoom = 6,
-     className, style, onReady }, ref) => {
+     className, style, onReady, onError }, ref) => {
 
     const elementRef = useRef<HTMLDivElement>(null);
     const mapRef     = useRef<GoogleMap | null>(null);
@@ -146,7 +147,7 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
         if (cancelled) { map.destroy().catch(() => {}); return; }
         mapRef.current = map;
         onReady?.();
-      })().catch(console.error);
+      })().catch((err) => { console.error(err); onError?.(err); });
 
       return () => {
         cancelled = true;
