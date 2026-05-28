@@ -2278,8 +2278,8 @@ export default function LiveIncidentPage() {
       ? new Date(currentIncident.liveStartedAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", hour12: false })
       : null;
     return (
-      <div className="flex flex-col h-full bg-background">
-        <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
+      <div className="flex flex-col h-full bg-background live-page-root">
+        <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0 bg-background">
           <Button variant="ghost" size="icon" onClick={() => navigate("/")} data-testid="button-back-panicker">
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -2488,8 +2488,8 @@ export default function LiveIncidentPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-background">
-      <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
+    <div className="flex flex-col h-full bg-background live-page-root">
+      <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0 bg-background">
         <Button variant="ghost" size="icon" onClick={() => navigate("/")} data-testid="button-back-live">
           <ArrowLeft className="h-5 w-5" />
         </Button>
@@ -2707,7 +2707,7 @@ export default function LiveIncidentPage() {
         </div>
       )}
 
-      <div ref={scrollContainerRef} className="flex flex-col flex-1 gap-3 p-4 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex flex-col flex-1 gap-3 p-4 overflow-y-auto live-scroll">
         {currentIncident ? (
           <>
             {/* Joiner mode status banner */}
@@ -2966,7 +2966,7 @@ export default function LiveIncidentPage() {
           </div>
         ) : (
           <div
-            className={navMode ? "relative overflow-hidden" : "relative rounded-lg overflow-hidden min-h-[200px] flex-1"}
+            className={navMode ? "relative overflow-hidden native-map-host" : "relative rounded-lg overflow-hidden min-h-[200px] flex-1 native-map-host"}
             style={navMode ? { height: "calc(100dvh - 3.5rem)" } : undefined}
           >
             {/* Nav mode: step banner overlaid at the top of the (tall in-flow) map.
