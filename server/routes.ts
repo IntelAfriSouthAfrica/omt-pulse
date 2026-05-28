@@ -2581,12 +2581,28 @@ export async function registerRoutes(
     const cats = await storage.getCategories(orgId);
     const cat = cats.find((c) => c.id === incident.categoryId);
     const isPanic = !!cat && cat.name.toLowerCase() === "panic";
-    const { liveConvertLat, liveConvertLng } = req.body;
+    const { liveConvertLat, liveConvertLng, endLat, endLng } = req.body;
     const closureFields = (liveConvertLat != null && liveConvertLng != null)
       ? { liveConvertLat: Number(liveConvertLat), liveConvertLng: Number(liveConvertLng) }
       : {};
+    // Snapshot the closer's last known position to liveEndLat/Lng before we
+    // null out responderLat/Lng. Prefer fresh coords explicitly sent by the
+    // client (one-shot getCurrentPosition at close time); fall back to the
+    // continuously-PATCHed responderLat/Lng cached on the incident row. This
+    // gives admins auditable proof of where the responder was standing when
+    // they closed the incident — the gap that previously made "Manually
+    // closed" entries show only Origin with no end-location.
+    const endLatVal = (endLat != null && Number.isFinite(Number(endLat)))
+      ? Number(endLat)
+      : (incident.responderLat != null ? Number(incident.responderLat) : null);
+    const endLngVal = (endLng != null && Number.isFinite(Number(endLng)))
+      ? Number(endLng)
+      : (incident.responderLng != null ? Number(incident.responderLng) : null);
+    const endPositionFields = (endLatVal != null && endLngVal != null)
+      ? { liveEndLat: endLatVal, liveEndLng: endLngVal }
+      : {};
     const panicClosure = isPanic ? { panicClosedAt: new Date() } : {};
-    const updated = await storage.updateIncident(id, { isLive: false, responderLat: null, responderLng: null, responderArrivedAt: null, liveEndedAt: new Date(), liveClosedManually: true, closedByUserId: userId, ...panicClosure, ...closureFields } as any, orgId);
+    const updated = await storage.updateIncident(id, { isLive: false, responderLat: null, responderLng: null, responderArrivedAt: null, liveEndedAt: new Date(), liveClosedManually: true, closedByUserId: userId, ...panicClosure, ...closureFields, ...endPositionFields } as any, orgId);
     // Close all active responders for this incident
     const activeResponders = await storage.getActiveLiveResponders(id, orgId);
     await storage.closeAllLiveResponders(id, orgId);

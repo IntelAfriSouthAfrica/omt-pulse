@@ -142,6 +142,8 @@ app.use((req, res, next) => {
   await safeMigrate("incidents.panic_acknowledged_by_user_id", sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS panic_acknowledged_by_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL`);
   await safeMigrate("incidents.closed_by_user_id", sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_by_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL`);
   await safeMigrate("incidents.responder_position_updated_at", sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS responder_position_updated_at TIMESTAMP`);
+  await safeMigrate("incidents.live_end_lat", sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS live_end_lat DOUBLE PRECISION`);
+  await safeMigrate("incidents.live_end_lng", sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS live_end_lng DOUBLE PRECISION`);
   // live_responders — create table (safe on existing DBs) then add optional columns
   await safeMigrate("live_responders.create", sql`
     CREATE TABLE IF NOT EXISTS live_responders (

@@ -220,6 +220,8 @@ export const incidents = pgTable("incidents", {
   liveClosedManually: boolean("live_closed_manually"),
   liveConvertLat: doublePrecision("live_convert_lat"),
   liveConvertLng: doublePrecision("live_convert_lng"),
+  liveEndLat: doublePrecision("live_end_lat"),
+  liveEndLng: doublePrecision("live_end_lng"),
   severity: text("severity"),
   panicAcknowledgedAt: timestamp("panic_acknowledged_at"),
   panicAcknowledgedByUserId: varchar("panic_acknowledged_by_user_id").references(() => users.id, { onDelete: "set null" }),

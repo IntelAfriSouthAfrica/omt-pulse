@@ -1603,6 +1603,20 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
                       </a>
                     </div>
                   )}
+                  {incident.liveEndedAt && incident.liveClosedManually && (incident as any).liveEndLat != null && (incident as any).liveEndLng != null && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Closed From</p>
+                      <a
+                        href={`https://www.google.com/maps?q=${(incident as any).liveEndLat},${(incident as any).liveEndLng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm mt-0.5 text-primary hover:underline flex items-center gap-1"
+                        data-testid="link-live-end-location"
+                      >
+                        {Number((incident as any).liveEndLat).toFixed(5)}, {Number((incident as any).liveEndLng).toFixed(5)} ↗
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {incidentResponders.length > 0 && (
