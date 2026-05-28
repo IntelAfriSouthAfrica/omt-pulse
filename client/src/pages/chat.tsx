@@ -160,6 +160,8 @@ export default function ChatPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSeenMsgIdRef = useRef<number | null>(null);
+  const hasInitialScrolledRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -195,9 +197,49 @@ export default function ChatPage() {
     refetchInterval: 3000,
   });
 
+  // Reset scroll-tracking state when switching conversations so the first paint
+  // of a new thread snaps instantly to the latest message (no smooth animation)
+  // and the new-message detector doesn't treat the entire thread as "new".
+  const activeConvoKey = activeConvo.type === "group" ? "group" : `dm:${activeConvo.recipientId}`;
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    lastSeenMsgIdRef.current = null;
+    hasInitialScrolledRef.current = false;
+  }, [activeConvoKey]);
+
+  // Smart auto-scroll:
+  //   1. On first paint of a thread → instant-jump to bottom (no animation).
+  //   2. On a genuinely-new message (last-message id changed) → smooth-scroll
+  //      ONLY if the user is already near the bottom. If they've scrolled up
+  //      to read history, leave them alone.
+  // Dependency is the last message id, not the messages array reference, so
+  // the 3 s refetch interval no longer fires the effect when nothing changed.
+  const lastMsgId = messages.length > 0 ? messages[messages.length - 1].id : null;
+  useEffect(() => {
+    const endEl = messagesEndRef.current;
+    if (!endEl) return;
+    // The Radix ScrollArea viewport is the nearest ancestor with this attribute.
+    const viewport = endEl.closest("[data-radix-scroll-area-viewport]") as HTMLElement | null;
+
+    if (!hasInitialScrolledRef.current && lastMsgId !== null) {
+      endEl.scrollIntoView({ behavior: "auto" });
+      hasInitialScrolledRef.current = true;
+      lastSeenMsgIdRef.current = lastMsgId;
+      return;
+    }
+
+    if (lastMsgId === null || lastMsgId === lastSeenMsgIdRef.current) return;
+    lastSeenMsgIdRef.current = lastMsgId;
+
+    // Only auto-stick if the user is within 80 px of the bottom.
+    let nearBottom = true;
+    if (viewport) {
+      const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      nearBottom = distanceFromBottom < 80;
+    }
+    if (nearBottom) {
+      endEl.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [lastMsgId]);
 
   const markRead = useCallback(async (recipientId: string | null) => {
     try {
@@ -211,10 +253,14 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }, [qc]);
 
+  // Use the stable string key (not the activeConvo object literal) so this
+  // effect only fires when the conversation actually changes, not on every
+  // render where the object is recreated.
   useEffect(() => {
     const rid = activeConvo.type === "group" ? null : activeConvo.recipientId;
     markRead(rid);
-  }, [activeConvo, markRead]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConvoKey, markRead]);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
