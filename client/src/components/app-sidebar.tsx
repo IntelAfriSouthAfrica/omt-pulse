@@ -19,6 +19,7 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarFooter,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -237,7 +238,12 @@ function VersionLabel() {
 
 export function AppSidebar({ user, onLogout, avatarPreview }: AppSidebarProps) {
   const [location] = useLocation();
+  const { isMobile, setOpenMobile } = useSidebar();
   const navItems = getNavItems(user.role, !!user.isSuperadmin);
+
+  function closeOnMobile() {
+    if (isMobile) setOpenMobile(false);
+  }
 
   const { data: liveIncidents = [] } = useQuery<unknown[]>({
     queryKey: ["/api/incidents/live"],
@@ -283,7 +289,7 @@ export function AppSidebar({ user, onLogout, avatarPreview }: AppSidebarProps) {
                     isActive={location === item.url}
                     data-testid={`link-nav-${item.title.toLowerCase().replace(/\s/g, '-')}`}
                   >
-                    <Link href={item.url}>
+                    <Link href={item.url} onClick={closeOnMobile}>
                       <item.icon />
                       <span className="flex-1">{item.title}</span>
                       {(item.url === "/live-monitor" || item.url === "/live-incident") && liveCount > 0 && (

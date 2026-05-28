@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MessageSquare, Send, Plus, Search, Users, ArrowLeft } from "lucide-react";
+import { MessageSquare, Send, Plus, Search, Users, ArrowLeft, ImageIcon, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = {
@@ -159,14 +159,18 @@ export default function ChatPage() {
   const qc = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [showThread, setShowThread] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [text, setText] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [activeConvo, setActiveConvo] = useState<{ type: "group" } | { type: "dm"; recipientId: string; recipientName: string; recipientAvatarUrl: string | null }>({ type: "group" });
 
   const { data: me } = useQuery<AuthUser>({ queryKey: ["/api/auth/me"] });
 
-  const { data: conversations = [], refetch: refetchConvos } = useQuery<Conversation[]>({
+  const { data: conversations = [] } = useQuery<Conversation[]>({
     queryKey: ["/api/chat/conversations"],
     refetchInterval: 5000,
   });
@@ -179,7 +183,7 @@ export default function ChatPage() {
     ? "/api/chat/messages?type=group&limit=50"
     : `/api/chat/messages?type=dm&with=${activeConvo.recipientId}&limit=50`;
 
-  const { data: messages = [], refetch: refetchMessages } = useQuery<ChatMessage[]>({
+  const { data: messages = [] } = useQuery<ChatMessage[]>({
     queryKey: messagesQueryKey,
     queryFn: async () => {
       const res = await fetch(messagesUrl, { credentials: "include" });
@@ -189,12 +193,10 @@ export default function ChatPage() {
     refetchInterval: 3000,
   });
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Mark thread as read when it becomes active
   const markRead = useCallback(async (recipientId: string | null) => {
     try {
       await fetch("/api/chat/read", {
@@ -226,6 +228,42 @@ export default function ChatPage() {
       toast({ title: "Failed to send message", variant: "destructive" });
     },
   });
+
+  async function handleImageFile(file: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Please select an image file", variant: "destructive" });
+      return;
+    }
+    setUploadingImage(true);
+    setShowAttachMenu(false);
+    try {
+      const reqRes = await apiRequest("POST", "/api/uploads/request-url", {
+        name: file.name,
+        size: file.size,
+        contentType: file.type,
+      });
+      const { uploadURL, objectUrl } = await reqRes.json();
+      await fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      const recipientId = activeConvo.type === "dm" ? activeConvo.recipientId : null;
+      await apiRequest("POST", "/api/chat/messages", {
+        recipientId,
+        content: `[img]${objectUrl}`,
+      });
+      qc.invalidateQueries({ queryKey: messagesQueryKey });
+      qc.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
+    } catch {
+      toast({ title: "Image upload failed", variant: "destructive" });
+    } finally {
+      setUploadingImage(false);
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+    }
+  }
 
   function handleSend() {
     const trimmed = text.trim();
@@ -272,7 +310,6 @@ export default function ChatPage() {
   const groupConvo = conversations[0];
   const dmConvos = conversations.slice(1);
 
-  // Group messages by date for display
   type MsgGroup = { date: string; messages: ChatMessage[] };
   const grouped: MsgGroup[] = [];
   let currentDate = "";
@@ -285,9 +322,57 @@ export default function ChatPage() {
     grouped[grouped.length - 1].messages.push(msg);
   }
 
+  function renderMessageContent(content: string, isMe: boolean) {
+    if (content.startsWith("[img]")) {
+      const url = content.slice(5);
+      const imgSrc = (() => { try { return new URL(url).pathname; } catch { return url; } })();
+      return (
+        <a href={imgSrc} target="_blank" rel="noopener noreferrer" data-testid="msg-image-link">
+          <img
+            src={imgSrc}
+            alt="Shared image"
+            className="max-w-[220px] rounded-xl border border-white/10 object-cover cursor-pointer"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).alt = "Image unavailable"; }}
+          />
+        </a>
+      );
+    }
+    return (
+      <div
+        className={cn(
+          "px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words",
+          isMe
+            ? "bg-primary text-primary-foreground rounded-br-sm"
+            : "bg-muted rounded-bl-sm"
+        )}
+      >
+        {content}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full overflow-hidden" data-testid="page-chat">
-      {/* Left panel — conversation list; full-width on mobile, fixed sidebar on md+ */}
+      {/* Hidden file inputs */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }}
+        data-testid="input-gallery-upload"
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }}
+        data-testid="input-camera-capture"
+      />
+
+      {/* Left panel — conversation list */}
       <div className={cn(
         "shrink-0 border-r flex flex-col bg-sidebar",
         "w-full md:w-72",
@@ -319,7 +404,6 @@ export default function ChatPage() {
 
         <ScrollArea className="flex-1">
           <div className="px-2 py-1 space-y-0.5">
-            {/* General group channel */}
             <button
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-left",
@@ -388,42 +472,22 @@ export default function ChatPage() {
         </ScrollArea>
       </div>
 
-      {/* Right panel — message thread; hidden on mobile until conversation selected */}
+      {/* Right panel — message thread */}
       <div className={cn(
         "flex flex-col flex-1 min-w-0",
         !showThread ? "hidden md:flex" : "flex"
       )}>
-        {/* Thread header */}
-        <div className="px-3 py-3 border-b shrink-0 flex items-center gap-2 bg-background">
-          {/* Back button — mobile only */}
+        {/* Minimal back row — mobile only, no name/avatar */}
+        <div className="flex md:hidden items-center px-2 py-1.5 border-b shrink-0 bg-background">
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden shrink-0 h-8 w-8"
+            className="h-8 w-8"
             onClick={() => setShowThread(false)}
             data-testid="button-back-to-conversations"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          {activeConvo.type === "group" ? (
-            <>
-              <div className="h-8 w-8 rounded-full bg-primary/15 flex items-center justify-center border border-primary/20 shrink-0">
-                <Users className="h-4 w-4 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold leading-tight">General</p>
-                <p className="text-xs text-muted-foreground truncate">Everyone in your organisation</p>
-              </div>
-            </>
-          ) : (
-            <>
-              <Initials firstName={activeConvo.recipientName.split(" ")[0]} lastName={activeConvo.recipientName.split(" ").slice(1).join(" ")} avatarUrl={activeConvo.recipientAvatarUrl} />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold leading-tight truncate">{activeConvo.recipientName}</p>
-                <p className="text-xs text-muted-foreground">Direct Message</p>
-              </div>
-            </>
-          )}
         </div>
 
         {/* Messages */}
@@ -446,6 +510,7 @@ export default function ChatPage() {
                   const isMe = msg.senderId === me?.id;
                   const prevMsg = group.messages[idx - 1];
                   const showAvatar = !prevMsg || prevMsg.senderId !== msg.senderId;
+                  const isImage = msg.content.startsWith("[img]");
 
                   return (
                     <div
@@ -453,7 +518,6 @@ export default function ChatPage() {
                       className={cn("flex items-end gap-2", isMe && "flex-row-reverse")}
                       data-testid={`msg-${msg.id}`}
                     >
-                      {/* Avatar — only shown on first message in a run */}
                       <div className="shrink-0 w-7">
                         {showAvatar && !isMe && (
                           <Initials firstName={msg.senderFirstName} lastName={msg.senderLastName} avatarUrl={msg.senderAvatarUrl} size="sm" />
@@ -466,22 +530,16 @@ export default function ChatPage() {
                             {isMe ? "You" : `${msg.senderFirstName} ${msg.senderLastName}`}
                           </span>
                         )}
-                        <div className="flex items-end gap-1.5">
-                          {isMe && (
+                        <div className={cn("flex items-end gap-1.5", isImage && "flex-col", isMe && !isImage && "flex-row-reverse")}>
+                          {!isImage && isMe && (
                             <span className="text-[10px] text-muted-foreground shrink-0 mb-0.5">{formatMessageTime(msg.createdAt)}</span>
                           )}
-                          <div
-                            className={cn(
-                              "px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words",
-                              isMe
-                                ? "bg-primary text-primary-foreground rounded-br-sm"
-                                : "bg-muted rounded-bl-sm"
-                            )}
-                          >
-                            {msg.content}
-                          </div>
-                          {!isMe && (
+                          {renderMessageContent(msg.content, isMe)}
+                          {!isImage && !isMe && (
                             <span className="text-[10px] text-muted-foreground shrink-0 mb-0.5">{formatMessageTime(msg.createdAt)}</span>
+                          )}
+                          {isImage && (
+                            <span className={cn("text-[10px] text-muted-foreground", isMe && "self-end")}>{formatMessageTime(msg.createdAt)}</span>
                           )}
                         </div>
                       </div>
@@ -494,27 +552,65 @@ export default function ChatPage() {
           <div ref={messagesEndRef} />
         </ScrollArea>
 
-        {/* Input */}
-        <div className="px-4 py-3 border-t shrink-0 flex items-end gap-2 bg-background">
-          <textarea
-            ref={inputRef}
-            className="flex-1 min-h-[40px] max-h-32 resize-none rounded-xl border bg-muted/40 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
-            placeholder={activeConvo.type === "group" ? "Message General…" : `Message ${activeConvo.type === "dm" ? activeConvo.recipientName : ""}…`}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            data-testid="input-chat-message"
-          />
-          <Button
-            size="icon"
-            className="shrink-0 h-10 w-10 rounded-xl"
-            onClick={handleSend}
-            disabled={!text.trim() || sendMutation.isPending}
-            data-testid="button-send-message"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
+        {/* Input bar */}
+        <div className="px-3 py-3 border-t shrink-0 bg-background">
+          {/* Attach menu */}
+          {showAttachMenu && (
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <button
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 px-2 rounded-lg hover:bg-muted/60"
+                onClick={() => galleryInputRef.current?.click()}
+                data-testid="button-attach-gallery"
+              >
+                <ImageIcon className="h-4 w-4" />
+                Gallery
+              </button>
+              <button
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 px-2 rounded-lg hover:bg-muted/60"
+                onClick={() => cameraInputRef.current?.click()}
+                data-testid="button-attach-camera"
+              >
+                <Camera className="h-4 w-4" />
+                Camera
+              </button>
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("shrink-0 h-10 w-10 rounded-xl", showAttachMenu && "text-primary bg-primary/10")}
+              onClick={() => setShowAttachMenu((v) => !v)}
+              disabled={uploadingImage}
+              data-testid="button-toggle-attach"
+              aria-label="Attach image"
+            >
+              {uploadingImage ? (
+                <span className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              ) : (
+                <ImageIcon className="h-4 w-4" />
+              )}
+            </Button>
+            <textarea
+              ref={inputRef}
+              className="flex-1 min-h-[40px] max-h-32 resize-none rounded-xl border bg-muted/40 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
+              placeholder={activeConvo.type === "group" ? "Message General…" : `Message ${activeConvo.type === "dm" ? activeConvo.recipientName : ""}…`}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              data-testid="input-chat-message"
+            />
+            <Button
+              size="icon"
+              className="shrink-0 h-10 w-10 rounded-xl"
+              onClick={handleSend}
+              disabled={!text.trim() || sendMutation.isPending}
+              data-testid="button-send-message"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
