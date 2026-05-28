@@ -121,6 +121,9 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
     const mapRef     = useRef<GoogleMap | null>(null);
     const polyIdsRef = useRef<string[]>([]);
     const userMarkerIdRef = useRef<string>('');
+    // Coalesced GPS updates — see setUserLocation for the race-avoidance rationale.
+    const pendingUserPosRef = useRef<{ lat: number; lng: number } | null>(null);
+    const userMarkerBusyRef = useRef<boolean>(false);
 
     // Create the native map once on mount; destroy on unmount.
     // Includes a 3-second readiness timeout: if GoogleMap.create() succeeds but
@@ -309,24 +312,41 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
         await mapRef.current.removeMarkers([id]).catch((e) => reportNativeError('removeMarker', e));
       },
 
-      // Place or update the "you are here" blue dot. Idempotent — removes the
-      // previous user marker before adding the new one so the position updates
-      // visually as GPS fixes arrive.
+      // Place or update the "you are here" blue dot. Idempotent and
+      // race-safe: GPS fixes can fire faster than the remove→add round-trip
+      // completes, so overlapping calls used to throw "Marker not found"
+      // when both tried to remove the same stale ID. Now we serialize: if a
+      // call is already running, the new one just updates `pendingUserPos`
+      // and the running one will pick up the latest coords on its next loop.
       async setUserLocation(lat, lng) {
         const map = mapRef.current;
         if (!map) return;
-        if (userMarkerIdRef.current) {
-          await map.removeMarker(userMarkerIdRef.current).catch((e) => reportNativeError('setUserLocation:removeMarker', e));
-          userMarkerIdRef.current = '';
+        pendingUserPosRef.current = { lat, lng };
+        if (userMarkerBusyRef.current) return; // existing loop will handle it
+        userMarkerBusyRef.current = true;
+        try {
+          // Loop until pending is drained so the final marker reflects the
+          // newest GPS fix, not a stale one that was queued before us.
+          while (pendingUserPosRef.current) {
+            const next = pendingUserPosRef.current;
+            pendingUserPosRef.current = null;
+            if (userMarkerIdRef.current) {
+              const idToRemove = userMarkerIdRef.current;
+              userMarkerIdRef.current = ''; // clear FIRST so nothing else sees the stale id
+              await map.removeMarker(idToRemove).catch((e) => reportNativeError('setUserLocation:removeMarker', e));
+            }
+            const ids = await map.addMarkers([{
+              coordinate: { lat: next.lat, lng: next.lng },
+              title: 'You',
+              // Google blue, fully opaque
+              tintColor: { r: 66, g: 133, b: 244, a: 255 },
+              zIndex: 100,
+            }]).catch((e) => { reportNativeError('setUserLocation:addMarkers', e); return [] as string[]; });
+            userMarkerIdRef.current = ids[0] ?? '';
+          }
+        } finally {
+          userMarkerBusyRef.current = false;
         }
-        const ids = await map.addMarkers([{
-          coordinate: { lat, lng },
-          title: 'You',
-          // Google blue, fully opaque
-          tintColor: { r: 66, g: 133, b: 244, a: 255 },
-          zIndex: 100,
-        }]).catch((e) => { reportNativeError('setUserLocation:addMarkers', e); return [] as string[]; });
-        userMarkerIdRef.current = ids[0] ?? '';
       },
 
     }), [apiKey]); // eslint-disable-line react-hooks/exhaustive-deps

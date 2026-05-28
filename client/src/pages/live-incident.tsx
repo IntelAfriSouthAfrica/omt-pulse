@@ -612,9 +612,13 @@ export default function LiveIncidentPage() {
           drawRoute(destPositionRef.current.lat, destPositionRef.current.lng, p);
         }
         if (navModeRef.current) {
+          // animate:false — the plugin's `angle` field only accepts 0 or 45
+          // (discrete, not interpolated). Animating rapid GPS updates makes the
+          // tilt visibly stutter or never reach 45° at all on Android.
           capMapRef.current.setCamera({
             lat: p.lat, lng: p.lng, zoom: 17, tilt: 45,
             bearing: lastHeadingRef.current ?? 0,
+            animate: false,
           }).catch(() => {});
         } else {
           capMapRef.current.setCamera({ lat: p.lat, lng: p.lng, tilt: 0 }).catch(() => {});
@@ -2008,9 +2012,14 @@ export default function LiveIncidentPage() {
           if (currStep) setStepDist(Math.round(haversineM(pos, { lat: currStep.end_location.lat(), lng: currStep.end_location.lng() })));
         }
         if (lastPosRef.current) {
+          // animate:false — apply tilt instantly on nav-mode entry. With
+          // animate:true the discrete 0→45 angle transition can be interrupted
+          // by the next GPS-driven setCamera before it completes, leaving the
+          // map flat. See GPS callback above for the same rationale.
           capMapRef.current.setCamera({
             lat: lastPosRef.current.lat, lng: lastPosRef.current.lng,
             zoom: 17, tilt: 45, bearing: lastHeadingRef.current ?? 0,
+            animate: false,
           }).catch(() => {});
         }
       } else {
@@ -2018,6 +2027,7 @@ export default function LiveIncidentPage() {
           capMapRef.current.setCamera({
             lat: lastPosRef.current.lat, lng: lastPosRef.current.lng,
             zoom: 15, tilt: 0, bearing: 0,
+            animate: false,
           }).catch(() => {});
         }
         lastHeadingRef.current = null;
