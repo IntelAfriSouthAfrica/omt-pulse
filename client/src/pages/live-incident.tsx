@@ -289,7 +289,9 @@ export default function LiveIncidentPage() {
   const autoResumedNavRef = useRef(false);
   // Tracks responder userIds we've already announced so we only flash on genuinely new joiners.
   const knownResponderIdsRef = useRef<Set<string>>(new Set());
-  // Name to flash briefly when a new responder joins while in nav mode (auto-clears after 5s).
+  // Seeded on the first effect run so pre-existing responders never trigger a flash.
+  const responderSeedDoneRef = useRef(false);
+  // Name to flash when a new responder joins (auto-clears after 10s).
   const [newJoinerFlash, setNewJoinerFlash] = useState<string | null>(null);
   // Timestamp of the last auto-reroute, for 30-second rate-limiting.
   const lastRerouteRef = useRef<number>(0);
@@ -2050,23 +2052,54 @@ export default function LiveIncidentPage() {
     if (!navMode) void stopSpeaking();
   }, [navMode]);
 
-  // Detect new joiners while in nav mode — flash their first name for 5 s.
-  // Seeds the known-set silently on first render so pre-existing responders never trigger a flash.
+  // Reset the joiner-detection seed whenever the incident context changes so
+  // pre-existing responders on a different incident don't get re-announced as
+  // "new joiners". Also clears any in-flight flash from the previous incident.
+  useEffect(() => {
+    knownResponderIdsRef.current = new Set();
+    responderSeedDoneRef.current = false;
+    setNewJoinerFlash(null);
+  }, [currentIncidentId]);
+
+  // Detect new joiners on the creator's view — surface a toast + vibration + a
+  // 10 s flash chip in nav mode. Fires regardless of whether the creator is
+  // currently in nav mode (a polled responder showing up while they're on the
+  // panel screen still pops a toast). First-render is seeded silently so
+  // pre-existing responders never trigger a flash on page load.
   useEffect(() => {
     if (!currentIncident?.responders) return;
-    const nonSelf = currentIncident.responders.filter(r => r.userId !== me?.id);
-    const newJoiners = navMode
-      ? nonSelf.filter(r => !knownResponderIdsRef.current.has(r.userId))
-      : [];
-    // Always keep the set current regardless of nav mode
+    // Only the creator gets the "backup arrived" surface — joiners shouldn't
+    // get a toast when other joiners arrive.
+    if (!me?.id || currentIncident.userId !== me.id) return;
+    const nonSelf = currentIncident.responders.filter(r => r.userId !== me.id);
+
+    if (!responderSeedDoneRef.current) {
+      nonSelf.forEach(r => knownResponderIdsRef.current.add(r.userId));
+      responderSeedDoneRef.current = true;
+      return;
+    }
+
+    const newJoiners = nonSelf.filter(r => !knownResponderIdsRef.current.has(r.userId));
     nonSelf.forEach(r => knownResponderIdsRef.current.add(r.userId));
     if (newJoiners.length === 0) return;
+
     const latest = newJoiners[newJoiners.length - 1];
+    const fullName = `${latest.firstName} ${latest.lastName}`.trim() || latest.firstName;
+
     setNewJoinerFlash(`${latest.firstName} joined`);
-    const t = setTimeout(() => setNewJoinerFlash(null), 5000);
+    const t = setTimeout(() => setNewJoinerFlash(null), 10000);
+
+    toast({
+      title: "👥 Backup on the way",
+      description: `${fullName} has joined and is en route.`,
+    });
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      try { navigator.vibrate([120, 60, 120]); } catch { /* ignored */ }
+    }
+
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIncident?.responders, navMode, me?.id]);
+  }, [currentIncident?.responders, currentIncident?.userId, me?.id]);
 
   // Keep currentStepIndexRef in sync so the step-tracking interval can read the latest step index.
   useEffect(() => { currentStepIndexRef.current = currentStepIndex; }, [currentStepIndex]);
@@ -3279,10 +3312,10 @@ export default function LiveIncidentPage() {
                   )}
                   {navResponders.length > 0 && (
                     <div
-                      className={`pointer-events-none ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 shadow-lg text-xs font-semibold transition-colors duration-300 ${newJoinerFlash ? "bg-green-500 text-white" : "bg-black/55 text-white"}`}
+                      className={`pointer-events-none ml-auto inline-flex items-center gap-1.5 rounded-full shadow-lg font-semibold transition-all duration-300 ${newJoinerFlash ? "bg-green-500 text-white px-3 py-1.5 text-sm ring-2 ring-white/70 animate-pulse" : "bg-black/55 text-white px-2.5 py-1 text-xs"}`}
                       data-testid="chip-nav-responders"
                     >
-                      <Users className="h-3 w-3 shrink-0" />
+                      <Users className={`shrink-0 ${newJoinerFlash ? "h-4 w-4" : "h-3 w-3"}`} />
                       <span>
                         {newJoinerFlash
                           ? newJoinerFlash
