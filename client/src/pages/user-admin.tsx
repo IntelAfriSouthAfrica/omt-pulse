@@ -1511,6 +1511,7 @@ function CopyAlertReminderButton({ userId, firstName }: { userId: string; firstN
     <Button
       variant="ghost"
       size="icon"
+      className="min-h-[44px] min-w-[44px] touch-manipulation"
       onClick={handleCopy}
       title={`Copy alert-reminder link for ${firstName} — send this link to help them enable notifications`}
       data-testid={`button-copy-alert-reminder-${userId}`}
@@ -1538,12 +1539,189 @@ function CopyInviteButton({ userId, firstName, inviteToken }: { userId: string; 
     <Button
       variant="ghost"
       size="icon"
+      className="min-h-[44px] min-w-[44px] touch-manipulation"
       onClick={handleCopy}
       title={`Copy invite link for ${firstName}`}
       data-testid={`button-copy-invite-${userId}`}
     >
       {copied ? <CheckCheck className="h-4 w-4 text-primary" /> : <Link2 className="h-4 w-4 text-primary" />}
     </Button>
+  );
+}
+
+function UserAvatar({ user, className = "h-8 w-8" }: { user: OrgUser; className?: string }) {
+  return (
+    <div className={`rounded-full bg-primary/10 flex items-center justify-center overflow-hidden shrink-0 border border-border ${className}`} data-testid={`avatar-user-${user.id}`}>
+      {user.avatarUrl ? (
+        <img src={user.avatarUrl} alt={user.firstName} className="h-full w-full object-cover" />
+      ) : (
+        <span className="text-xs font-semibold text-primary select-none">
+          {`${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase()}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function UserStatusBadge({ user }: { user: OrgUser }) {
+  if (user.inviteToken) {
+    return (
+      <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400">
+        Pending
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant={user.isActive ? "default" : "secondary"} className={user.isActive ? "bg-green-600 dark:bg-green-700" : ""}>
+      {user.isActive ? "Active" : "Inactive"}
+    </Badge>
+  );
+}
+
+function UserPushIcon({ user }: { user: OrgUser }) {
+  if (user.hasPushSubscription) {
+    return (
+      <span title="Push notifications enabled" data-testid={`icon-push-on-${user.id}`} className="inline-flex items-center justify-center">
+        <Bell className="h-4 w-4 text-green-600 dark:text-green-400 fill-green-600 dark:fill-green-400" />
+      </span>
+    );
+  }
+  return (
+    <span
+      title="Push notifications not enabled"
+      data-testid={`icon-push-off-${user.id}`}
+      className="inline-flex items-center justify-center"
+    >
+      <BellOff className="h-4 w-4 text-muted-foreground/40" />
+    </span>
+  );
+}
+
+type UserActionHandlers = {
+  onEdit: () => void;
+  onAssign: () => void;
+  onToggleStatus: () => void;
+  onDelete: () => void;
+  onViewIncidents: () => void;
+  onAudit: () => void;
+};
+
+function UserActionButtons({
+  user,
+  isSelf,
+  showIncidentsAndAudit,
+  statusMutationPending,
+  className = "justify-end",
+  ...handlers
+}: {
+  user: OrgUser;
+  isSelf: boolean;
+  showIncidentsAndAudit: boolean;
+  statusMutationPending: boolean;
+  className?: string;
+} & UserActionHandlers) {
+  const touchIcon = "min-h-[44px] min-w-[44px] touch-manipulation";
+  return (
+    <div className={`flex flex-wrap gap-1 ${className}`}>
+      <Button variant="ghost" size="icon" className={touchIcon} onClick={handlers.onEdit} title="Edit user" data-testid={`button-edit-user-${user.id}`}>
+        <Pencil className="h-4 w-4" />
+      </Button>
+      {!user.hasPushSubscription && <CopyAlertReminderButton userId={user.id} firstName={user.firstName} />}
+      {user.inviteToken && user.inviteTokenExpiresAt && new Date(user.inviteTokenExpiresAt) > new Date() && (
+        <CopyInviteButton userId={user.id} firstName={user.firstName} inviteToken={user.inviteToken} />
+      )}
+      <RegenerateInviteButton userId={user.id} firstName={user.firstName} />
+      {(user.role === "supervisor" || user.role === "reporter") && (
+        <Button variant="ghost" size="icon" className={touchIcon} onClick={handlers.onAssign} title="Assign locations" data-testid={`button-assign-locations-${user.id}`}>
+          <MapPin className="h-4 w-4 text-primary" />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon"
+        className={touchIcon}
+        disabled={isSelf || statusMutationPending}
+        onClick={handlers.onToggleStatus}
+        title={user.isActive ? "Deactivate user" : "Activate user"}
+        data-testid={`button-toggle-status-${user.id}`}
+      >
+        {user.isActive ? <ShieldOff className="h-4 w-4 text-amber-500" /> : <ShieldCheck className="h-4 w-4 text-green-600" />}
+      </Button>
+      <Button variant="ghost" size="icon" className={touchIcon} disabled={isSelf} onClick={handlers.onDelete} title="Delete user" data-testid={`button-delete-user-${user.id}`}>
+        <Trash2 className="h-4 w-4 text-destructive" />
+      </Button>
+      {showIncidentsAndAudit && (
+        <>
+          <Button variant="ghost" size="icon" className={touchIcon} onClick={handlers.onViewIncidents} title="View incidents" data-testid={`button-view-incidents-${user.id}`}>
+            <ClipboardList className="h-4 w-4 text-primary" />
+          </Button>
+          <Button variant="ghost" size="icon" className={touchIcon} onClick={handlers.onAudit} title="Audit trail" data-testid={`button-audit-${user.id}`}>
+            <ScrollText className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function UserMobileCard({
+  user,
+  isSelf,
+  isHighlighted,
+  showIncidentsAndAudit,
+  statusMutationPending,
+  handlers,
+}: {
+  user: OrgUser;
+  isSelf: boolean;
+  isHighlighted: boolean;
+  showIncidentsAndAudit: boolean;
+  statusMutationPending: boolean;
+  handlers: UserActionHandlers;
+}) {
+  return (
+    <div
+      className={`rounded-lg border bg-card p-4 space-y-3 ${isHighlighted ? "ring-2 ring-primary bg-primary/5" : ""}`}
+      data-testid={`card-user-${user.id}`}
+    >
+      <div className="flex items-start gap-3 min-w-0">
+        <UserAvatar user={user} className="h-10 w-10" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold leading-tight">{user.firstName} {user.lastName}</p>
+          <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <Badge variant={roleBadgeVariant(user.role)} className="capitalize text-xs">{user.role}</Badge>
+            <UserStatusBadge user={user} />
+            <UserPushIcon user={user} />
+          </div>
+        </div>
+      </div>
+
+      <div className="text-xs text-muted-foreground" data-testid={`text-commands-mobile-${user.id}`}>
+        <span className="font-medium text-foreground/80">Group: </span>
+        {user.commands && user.commands.length > 0
+          ? user.commands.map((c) => c.name).join(", ")
+          : "None assigned"}
+      </div>
+
+      <Button
+        className="w-full min-h-[44px] touch-manipulation"
+        onClick={handlers.onEdit}
+        data-testid={`button-edit-user-mobile-${user.id}`}
+      >
+        <Pencil className="h-4 w-4 mr-2" />
+        Edit user & password
+      </Button>
+
+      <UserActionButtons
+        user={user}
+        isSelf={isSelf}
+        showIncidentsAndAudit={showIncidentsAndAudit}
+        statusMutationPending={statusMutationPending}
+        className="justify-start border-t pt-3"
+        {...handlers}
+      />
+    </div>
   );
 }
 
@@ -1573,6 +1751,7 @@ function RegenerateInviteButton({ userId, firstName }: { userId: string; firstNa
     <Button
       variant="ghost"
       size="icon"
+      className="min-h-[44px] min-w-[44px] touch-manipulation"
       onClick={() => regenMutation.mutate()}
       disabled={regenMutation.isPending}
       title={`Generate invite link for ${firstName}`}
@@ -1606,7 +1785,9 @@ export default function UserAdminPage() {
   // Scroll the highlighted row into view whenever it changes.
   useEffect(() => {
     if (!highlightedUserId) return;
-    const row = document.querySelector(`[data-testid="row-user-${highlightedUserId}"]`);
+    const row = document.querySelector(
+      `[data-testid="row-user-${highlightedUserId}"], [data-testid="card-user-${highlightedUserId}"]`,
+    );
     row?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightedUserId]);
 
@@ -1665,11 +1846,24 @@ export default function UserAdminPage() {
     setDialogOpen(true);
   }
 
+  const showIncidentsAndAudit = currentUser?.role === "administrator" || currentUser?.role === "supervisor";
+
+  function userHandlers(user: OrgUser): UserActionHandlers {
+    return {
+      onEdit: () => openEdit(user),
+      onAssign: () => setAssignTarget(user),
+      onToggleStatus: () => statusMutation.mutate({ id: user.id, isActive: !user.isActive }),
+      onDelete: () => setDeleteTarget(user),
+      onViewIncidents: () => setViewIncidentsTarget(user),
+      onAudit: () => setAuditTarget(user),
+    };
+  }
+
   return (
-    <div className="p-6 space-y-6 overflow-y-auto h-full">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight" data-testid="text-user-admin-title">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 overflow-y-auto h-full min-h-0 pb-8">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight" data-testid="text-user-admin-title">
             <Users className="inline h-6 w-6 mr-2 -mt-0.5" />
             User Admin
           </h1>
@@ -1677,7 +1871,7 @@ export default function UserAdminPage() {
             Manage users within your organization
           </p>
         </div>
-        <Button onClick={openAdd} data-testid="button-add-user">
+        <Button onClick={openAdd} className="w-full sm:w-auto shrink-0 min-h-[44px] touch-manipulation" data-testid="button-add-user">
           <Plus className="h-4 w-4 mr-2" />
           Add User
         </Button>
@@ -1694,13 +1888,37 @@ export default function UserAdminPage() {
           <p className="text-xs text-muted-foreground mt-1">
             {usersWithoutCommand.map((u) => `${u.firstName} ${u.lastName}`).join(", ")}
             {" "}— they can't raise a panic or have their incidents scoped until you assign a Group.
-            Click the pencil to edit each one and tick a Group.
+            Tap <strong>Edit user & password</strong> on each one and tick a Group.
           </p>
         </div>
       )}
 
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Mobile: card layout with all actions visible */}
+      <div className="lg:hidden space-y-3">
+        {isLoading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-44 w-full rounded-lg" />)
+        ) : users.length === 0 ? (
+          <div className="rounded-lg border px-4 py-8 text-center text-muted-foreground text-sm">
+            No users yet. Tap "Add User" to create one.
+          </div>
+        ) : (
+          users.map((user) => (
+            <UserMobileCard
+              key={user.id}
+              user={user}
+              isSelf={user.id === currentUser?.id}
+              isHighlighted={highlightedUserId === user.id}
+              showIncidentsAndAudit={!!showIncidentsAndAudit}
+              statusMutationPending={statusMutation.isPending}
+              handlers={userHandlers(user)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Desktop: full table */}
+      <div className="hidden lg:block border rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[960px]">
           <thead className="bg-muted/50 border-b">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Name</th>
@@ -1741,15 +1959,7 @@ export default function UserAdminPage() {
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden shrink-0 border border-border" data-testid={`avatar-user-${user.id}`}>
-                          {user.avatarUrl ? (
-                            <img src={user.avatarUrl} alt={user.firstName} className="h-full w-full object-cover" />
-                          ) : (
-                            <span className="text-xs font-semibold text-primary select-none">
-                              {`${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase()}
-                            </span>
-                          )}
-                        </div>
+                        <UserAvatar user={user} />
                         <span className="font-medium">{user.firstName} {user.lastName}</span>
                       </div>
                     </td>
@@ -1775,109 +1985,19 @@ export default function UserAdminPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {user.inviteToken ? (
-                        <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400">
-                          Pending
-                        </Badge>
-                      ) : (
-                        <Badge variant={user.isActive ? "default" : "secondary"} className={user.isActive ? "bg-green-600 dark:bg-green-700" : ""}>
-                          {user.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      )}
+                      <UserStatusBadge user={user} />
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {user.hasPushSubscription ? (
-                        <span
-                          title="Push notifications enabled"
-                          data-testid={`icon-push-on-${user.id}`}
-                          className="inline-flex items-center justify-center"
-                        >
-                          <Bell className="h-4 w-4 text-green-600 dark:text-green-400 fill-green-600 dark:fill-green-400" />
-                        </span>
-                      ) : (
-                        <span
-                          title="Push notifications not enabled — user has not opened the app or has not granted permission"
-                          data-testid={`icon-push-off-${user.id}`}
-                          className="inline-flex items-center justify-center"
-                        >
-                          <BellOff className="h-4 w-4 text-muted-foreground/40" />
-                        </span>
-                      )}
+                      <UserPushIcon user={user} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEdit(user)}
-                          title="Edit user"
-                          data-testid={`button-edit-user-${user.id}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        {!user.hasPushSubscription && (
-                          <CopyAlertReminderButton userId={user.id} firstName={user.firstName} />
-                        )}
-                        {user.inviteToken && user.inviteTokenExpiresAt && new Date(user.inviteTokenExpiresAt) > new Date() && (
-                          <CopyInviteButton userId={user.id} firstName={user.firstName} inviteToken={user.inviteToken} />
-                        )}
-                        <RegenerateInviteButton userId={user.id} firstName={user.firstName} />
-                        {(user.role === "supervisor" || user.role === "reporter") && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setAssignTarget(user)}
-                            title="Assign locations"
-                            data-testid={`button-assign-locations-${user.id}`}
-                          >
-                            <MapPin className="h-4 w-4 text-primary" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          disabled={isSelf || statusMutation.isPending}
-                          onClick={() => statusMutation.mutate({ id: user.id, isActive: !user.isActive })}
-                          title={user.isActive ? "Deactivate user" : "Activate user"}
-                          data-testid={`button-toggle-status-${user.id}`}
-                        >
-                          {user.isActive
-                            ? <ShieldOff className="h-4 w-4 text-amber-500" />
-                            : <ShieldCheck className="h-4 w-4 text-green-600" />}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          disabled={isSelf}
-                          onClick={() => setDeleteTarget(user)}
-                          title="Delete user"
-                          data-testid={`button-delete-user-${user.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                        {(currentUser?.role === "administrator" || currentUser?.role === "supervisor") && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setViewIncidentsTarget(user)}
-                            title="View incidents"
-                            data-testid={`button-view-incidents-${user.id}`}
-                          >
-                            <ClipboardList className="h-4 w-4 text-primary" />
-                          </Button>
-                        )}
-                        {(currentUser?.role === "administrator" || currentUser?.role === "supervisor") && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setAuditTarget(user)}
-                            title="Audit trail"
-                            data-testid={`button-audit-${user.id}`}
-                          >
-                            <ScrollText className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
+                      <UserActionButtons
+                        user={user}
+                        isSelf={isSelf}
+                        showIncidentsAndAudit={!!showIncidentsAndAudit}
+                        statusMutationPending={statusMutation.isPending}
+                        {...userHandlers(user)}
+                      />
                     </td>
                   </tr>
                 );
