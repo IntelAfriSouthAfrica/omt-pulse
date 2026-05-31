@@ -16,13 +16,16 @@ import {
   MessageCircle,
   ArrowRight,
   CheckCircle2,
-  Building2,
   Home as HomeIcon,
   GraduationCap,
   HardHat,
   Siren,
+  Smartphone,
+  Download,
 } from "lucide-react";
 import omtLogo from "@/assets/omt-logo-v2.png";
+import { ProductPreviewsSection } from "@/components/marketing/product-previews";
+import { INTELAFRI_URL, PLAY_STORE_URL } from "@/lib/site-links";
 
 const WHATSAPP_NUMBER = "27675351325";
 const SALES_EMAIL = "sales@intelafri.org";
@@ -56,6 +59,24 @@ const AUDIENCES = [
   { icon: GraduationCap, label: "Campuses" },
   { icon: HardHat, label: "Mine sites" },
   { icon: Siren, label: "Response teams" },
+];
+
+const GET_STARTED = [
+  {
+    step: "1",
+    title: "Start with a trial",
+    body: "48-hour trial for your organisation. We set up your first command and users.",
+  },
+  {
+    step: "2",
+    title: "On-site rollout",
+    body: "We configure locations, categories, and custom maps for your site or estate.",
+  },
+  {
+    step: "3",
+    title: "Ongoing support",
+    body: "WhatsApp and email support. Pricing tailored to team size and number of sites.",
+  },
 ];
 
 // Apply landing-specific SEO tags. Restored when the visitor navigates away.
@@ -165,22 +186,33 @@ export default function LandingPage() {
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link href="/" className="flex items-center gap-2.5" data-testid="link-home">
-            <img src={omtLogo} alt="OMT Pulse" className="h-9 w-9 rounded-md" />
+            <img src={omtLogo} alt="OMT Pulse" className="h-9 w-9 rounded-md" loading="eager" />
             <span className="text-base font-semibold tracking-tight">OMT Pulse</span>
           </Link>
           <nav className="flex items-center gap-2 sm:gap-3">
+            <a href="#product" className="hidden text-sm text-muted-foreground hover:text-foreground md:inline" data-testid="link-product">
+              Product
+            </a>
             <a href="#features" className="hidden text-sm text-muted-foreground hover:text-foreground sm:inline" data-testid="link-features">
               Features
             </a>
-            <a href="#audiences" className="hidden text-sm text-muted-foreground hover:text-foreground sm:inline" data-testid="link-audiences">
+            <a href="#audiences" className="hidden text-sm text-muted-foreground hover:text-foreground lg:inline" data-testid="link-audiences">
               Who it's for
+            </a>
+            <a href="#get-started" className="hidden text-sm text-muted-foreground hover:text-foreground lg:inline" data-testid="link-get-started">
+              Get started
             </a>
             <a href="#contact" className="hidden text-sm text-muted-foreground hover:text-foreground sm:inline" data-testid="link-contact">
               Contact
             </a>
+            <a href="#install">
+              <Button size="sm" variant="outline" className="hidden sm:inline-flex" data-testid="button-get-app">
+                Get the app
+              </Button>
+            </a>
             <Link href="/login">
-              <Button size="sm" variant="outline" data-testid="button-signin">
-                Sign in / Install app
+              <Button size="sm" data-testid="button-signin">
+                Sign in
               </Button>
             </Link>
           </nav>
@@ -220,19 +252,21 @@ export default function LandingPage() {
                 </Button>
               </a>
               <Link href="/login">
-                <Button
-                  size="lg"
-                  variant="ghost"
-                  className="w-full sm:w-auto"
-                  data-testid="button-cta-signin"
-                >
-                  Sign in / Install app
+                <Button size="lg" variant="outline" className="w-full sm:w-auto" data-testid="button-cta-signin">
+                  Sign in
                 </Button>
               </Link>
+              <a href="#install">
+                <Button size="lg" variant="ghost" className="w-full sm:w-auto" data-testid="button-cta-app">
+                  Get the app
+                </Button>
+              </a>
             </div>
           </div>
         </div>
       </section>
+
+      <ProductPreviewsSection />
 
       {/* ── Why OMT Pulse — exactly 4 cards ─────────────────────────────── */}
       <section id="features" className="mx-auto max-w-6xl px-4 pb-16 sm:px-6 sm:pb-24">
@@ -285,6 +319,87 @@ export default function LandingPage() {
                 <div className="text-sm font-semibold text-foreground">{label}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── How teams get started ─────────────────────────────────────────── */}
+      <section id="get-started" className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+        <div className="mb-10 text-center">
+          <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">How teams get started</h2>
+          <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+            Contact us for estate, site, or company pricing — we&apos;ll scope it to your team.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          {GET_STARTED.map(({ step, title, body }) => (
+            <div
+              key={step}
+              className="rounded-2xl border border-border bg-card p-6"
+              data-testid={`get-started-${step}`}
+            >
+              <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                {step}
+              </div>
+              <h3 className="mb-1.5 text-base font-semibold">{title}</h3>
+              <p className="text-sm leading-relaxed text-muted-foreground">{body}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-8 text-center text-sm text-muted-foreground">
+          Trusted by security teams across South Africa — from estates and campuses to mine sites and response units.
+        </p>
+      </section>
+
+      {/* ── Install the app ──────────────────────────────────────────────── */}
+      <section id="install" className="border-y border-border bg-primary/[0.04]">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+          <div className="mb-10 text-center">
+            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Get the app</h2>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              Use OMT Pulse in the field on Android or install the web app on any device.
+            </p>
+          </div>
+          <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Smartphone className="h-5 w-5" />
+              </div>
+              <h3 className="mb-1 text-lg font-semibold">Android app</h3>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Native maps, push alerts, and panic notifications on patrol phones.
+              </p>
+              {PLAY_STORE_URL ? (
+                <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" data-testid="link-play-store">
+                  <Button className="w-full">
+                    <Download className="mr-2 h-4 w-4" />
+                    Google Play
+                  </Button>
+                </a>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Google Play listing coming soon —{" "}
+                  <a href="#contact" className="font-medium text-primary hover:underline">
+                    contact us
+                  </a>{" "}
+                  for early access.
+                </p>
+              )}
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Download className="h-5 w-5" />
+              </div>
+              <h3 className="mb-1 text-lg font-semibold">Web app (PWA)</h3>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Sign in on your phone browser, then use your browser&apos;s &quot;Add to Home Screen&quot; option to install.
+              </p>
+              <Link href="/login">
+                <Button variant="outline" className="w-full" data-testid="button-pwa-signin">
+                  Sign in to install
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </section>
@@ -466,20 +581,40 @@ export default function LandingPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-xs text-muted-foreground sm:flex-row sm:px-6">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 text-xs text-muted-foreground sm:flex-row sm:px-6">
           <div className="flex items-center gap-2">
-            <img src={omtLogo} alt="OMT Pulse" className="h-5 w-5 rounded" />
+            <img src={omtLogo} alt="OMT Pulse" className="h-5 w-5 rounded" loading="lazy" />
             <span>© {new Date().getFullYear()} OMT Pulse · An IntelAfri product</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <a
+              href={INTELAFRI_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground"
+              data-testid="link-footer-intelafri"
+            >
+              IntelAfri
+            </a>
             <Link href="/privacy" className="hover:text-foreground" data-testid="link-footer-privacy">
               Privacy Policy
             </Link>
+            {PLAY_STORE_URL ? (
+              <a
+                href={PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-foreground"
+                data-testid="link-footer-play-store"
+              >
+                Google Play
+              </a>
+            ) : null}
             <a href={`mailto:${SALES_EMAIL}`} className="hover:text-foreground" data-testid="link-footer-email">
               {SALES_EMAIL}
             </a>
             <Link href="/login" className="hover:text-foreground" data-testid="link-footer-signin">
-              Existing user? Sign in
+              Sign in
             </Link>
           </div>
         </div>
