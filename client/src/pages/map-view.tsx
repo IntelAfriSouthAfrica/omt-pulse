@@ -20,6 +20,7 @@ function GeographicMap({ incidents, categories, locations, liveIncidents }: {
   const liveMarkersRef = useRef<google.maps.Marker[]>([]);
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsError, setMapsError] = useState(false);
+  const [mapsErrorMsg, setMapsErrorMsg] = useState<string | null>(null);
 
   const getCategoryColor = (id: number | null) => categories.find((c) => c.id === id)?.color ?? "#3B82F6";
   const getCategoryIcon = (id: number | null) => categories.find((c) => c.id === id)?.icon ?? "alert";
@@ -46,7 +47,12 @@ function GeographicMap({ incidents, categories, locations, liveIncidents }: {
   useEffect(() => {
     loadGoogleMaps()
       .then(() => setMapsReady(true))
-      .catch(() => setMapsError(true));
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[MapView] loadGoogleMaps failed:", msg);
+        setMapsErrorMsg(msg);
+        setMapsError(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -166,9 +172,23 @@ function GeographicMap({ incidents, categories, locations, liveIncidents }: {
   }, [liveIncidents, mapsReady]);
 
   if (mapsError) {
+    const keyConfigured = Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
     return (
-      <div style={{ height: "500px" }} className="rounded-md flex items-center justify-center bg-muted/30">
-        <p className="text-sm text-muted-foreground">Failed to load Google Maps. Check your API key.</p>
+      <div
+        style={{ height: "500px" }}
+        className="rounded-md flex items-center justify-center bg-destructive/5 border border-destructive/20"
+        data-testid="map-error"
+      >
+        <div className="text-center px-6 py-8 space-y-2 max-w-md">
+          <MapPin className="h-8 w-8 mx-auto text-destructive/60" />
+          <p className="text-sm font-medium">Failed to load Google Maps</p>
+          <p className="text-xs text-muted-foreground break-words">
+            {mapsErrorMsg ?? "Unknown error — check your API key and network connection."}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            API key in build: {keyConfigured ? "configured" : "missing (VITE_GOOGLE_MAPS_API_KEY)"}
+          </p>
+        </div>
       </div>
     );
   }

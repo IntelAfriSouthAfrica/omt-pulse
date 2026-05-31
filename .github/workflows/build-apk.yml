@@ -12,6 +12,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - name: Validate Maps API key secret
+        env:
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+        run: |
+          if [ -z "$VITE_GOOGLE_MAPS_API_KEY" ]; then
+            echo "::error::GitHub secret VITE_GOOGLE_MAPS_API_KEY is not set. Maps will not work in release builds."
+            exit 1
+          fi
+          echo "VITE_GOOGLE_MAPS_API_KEY is configured (${#VITE_GOOGLE_MAPS_API_KEY} chars)"
       - run: npm ci
       - run: npm run build
         env:
@@ -35,10 +44,27 @@ jobs:
             echo "::error::Decoded keystore is empty or invalid"
             exit 1
           fi
+      - name: Print upload keystore SHA-1 for GCP
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          echo "Add this SHA-1 to Google Cloud Console → Credentials → Android key (auto created by Firebase) → Android apps"
+          echo "Package: com.intelafri.omtpulse"
+          keytool -list -v \
+            -keystore android/app/release.keystore \
+            -alias "$KEY_ALIAS" \
+            -storepass "$KEYSTORE_PASSWORD" 2>/dev/null \
+            | grep -E "SHA1:|SHA-1:" || echo "::warning::Could not read SHA-1 — check KEY_ALIAS and KEYSTORE_PASSWORD secrets"
+          echo ""
+          echo "Also add the Play App Signing SHA-1 from Play Console → Setup → App integrity → App signing"
       - name: Build signed AAB and test APK
         working-directory: android
         run: ./gradlew bundleRelease assembleRelease
         env:
+          # Native maps: defaults to Firebase Android key in google-services.json.
+          # Optional override via GOOGLE_MAPS_ANDROID_API_KEY secret — must NOT be the Browser key.
+          GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

@@ -25,6 +25,22 @@ For full native map functionality, all of these must be enabled in Google Cloud 
 3. Geocoding API (implicitly included with Maps JS API for web, but separate for REST)
 4. Directions API (for route drawing via REST)
 
+## Play Store signing — Android API key restriction
+After publishing to Play Store, Google re-signs the app with the **Play App Signing** certificate.
+The Maps SDK for Android key must include SHA-1 fingerprints for:
+- **App signing key** (Play Console → Setup → App integrity → App signing)
+- **Upload/release keystore** (printed in GitHub Actions "Print upload keystore SHA-1" step)
+- **Debug keystore** (local dev only)
+
+Package name: `com.intelafri.omtpulse`
+
+The native key is injected at Gradle build. Resolution order:
+1. `GOOGLE_MAPS_ANDROID_API_KEY` env / `android/local.properties`
+2. Firebase **Android key** from `android/app/google-services.json` (auto)
+
+Do NOT reuse the Firebase **Browser key** (`VITE_GOOGLE_MAPS_API_KEY`) for native maps.
+After Play Store migration, add Play App Signing SHA-1 to the **Android key (auto created by Firebase)** in GCP Credentials.
+
 ## PermissionDeniedBanner must be hidden on native
 `navigator.permissions.query({ name: 'geolocation' })` returns "prompt" indefinitely in Capacitor WebView even after the user grants OS-level permission. Add `if (Capacitor.isNativePlatform()) return null;` at the top of PermissionDeniedBanner to suppress it.
 

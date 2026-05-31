@@ -3053,9 +3053,15 @@ export default function LiveIncidentPage() {
         {/* Map always mounted — avoids losing the google.maps.Map instance on state change */}
         {mapsError ? (
           <div className="flex-1 rounded-lg border border-destructive/40 bg-destructive/5 flex items-center justify-center min-h-[200px]" data-testid="map-error">
-            <div className="text-center px-6 py-8 space-y-2">
+            <div className="text-center px-6 py-8 space-y-2 max-w-md">
               <MapPin className="h-8 w-8 mx-auto text-destructive/60" />
-              <p className="text-sm text-muted-foreground">Map unavailable — contact your administrator.</p>
+              <p className="text-sm font-medium">Map unavailable</p>
+              <p className="text-xs text-muted-foreground break-words">
+                {mapsErrorMsg ?? "Google Maps failed to load — contact your administrator."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                API key in build: {import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? "configured" : "missing"}
+              </p>
             </div>
           </div>
         ) : (

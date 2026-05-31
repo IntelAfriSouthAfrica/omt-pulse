@@ -35,6 +35,12 @@ const allowlist = [
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
+  if (!process.env.VITE_GOOGLE_MAPS_API_KEY) {
+    console.warn(
+      "[build] WARNING: VITE_GOOGLE_MAPS_API_KEY is not set — Google Maps will not load in the web bundle.",
+    );
+  }
+
   console.log("building client...");
   await viteBuild();
 
