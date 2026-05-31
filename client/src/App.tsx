@@ -1,5 +1,11 @@
 import { Switch, Route, useLocation, Link } from "wouter";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import {
+  type NativePushStatus,
+  checkNativePushStatus,
+  enableNativePush,
+  registerNativePushToken,
+} from "@/lib/native-push";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -202,54 +208,76 @@ function usePushSubscription(userId: string | undefined) {
   return { subState, subscribe: doSubscribe };
 }
 
-type FcmState = "unknown" | "granted" | "denied" | "error";
-
 // ── Capacitor FCM token registration (native Android/iOS only) ───────────────
 function useCapacitorPush(userId: string | undefined) {
-  const [fcmState, setFcmState] = useState<FcmState>("unknown");
+  const [fcmState, setFcmState] = useState<NativePushStatus>("unknown");
+  const [enabling, setEnabling] = useState(false);
+
+  const syncIfGranted = useCallback(async () => {
+    try {
+      const status = await checkNativePushStatus();
+      if (status === "granted") {
+        await enableNativePush();
+        setFcmState("granted");
+        triggerBatteryHint();
+        return true;
+      }
+      setFcmState(status);
+      return false;
+    } catch {
+      setFcmState("error");
+      return false;
+    }
+  }, []);
+
+  const enablePush = useCallback(async () => {
+    if (enabling) return;
+    setEnabling(true);
+    try {
+      await enableNativePush();
+      setFcmState("granted");
+      triggerBatteryHint();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setFcmState(msg === "denied" ? "denied" : "error");
+    } finally {
+      setEnabling(false);
+    }
+  }, [enabling]);
 
   useEffect(() => {
-    if (!userId) return;
-    if (!isCapacitorNative()) return;
+    if (!userId || !isCapacitorNative()) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const { PushNotifications } = await import("@capacitor/push-notifications");
-        const permResult = await PushNotifications.requestPermissions();
-        if (permResult.receive !== "granted") {
-          if (!cancelled) setFcmState("denied");
-          return;
-        }
-        await PushNotifications.register();
-        PushNotifications.addListener("registration", async (tokenData) => {
-          if (cancelled) return;
-          try {
-            await fetch("/api/push/register-fcm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({ token: tokenData.value }),
-            });
-            if (!cancelled) {
-              setFcmState("granted");
-              triggerBatteryHint();
-            }
-          } catch {
-            if (!cancelled) setFcmState("error");
-          }
-        });
-        PushNotifications.addListener("registrationError", (err) => {
-          console.warn("[FCM] registration error:", err);
-          if (!cancelled) setFcmState("error");
-        });
-      } catch {
-        if (!cancelled) setFcmState("error");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [userId]);
 
-  return { fcmState };
+    (async () => {
+      if (cancelled) return;
+      await syncIfGranted();
+    })();
+
+    void import("@capacitor/push-notifications").then(({ PushNotifications }) => {
+      void PushNotifications.addListener("registration", async (tokenData) => {
+        if (cancelled) return;
+        try {
+          await registerNativePushToken(tokenData.value);
+          if (!cancelled) setFcmState("granted");
+        } catch {
+          if (!cancelled) setFcmState("error");
+        }
+      });
+    });
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void syncIfGranted();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [userId, syncIfGranted]);
+
+  return { fcmState, enablePush, enabling };
 }
 
 // ── Battery optimisation hint ────────────────────────────────────────────────
@@ -337,93 +365,57 @@ function BatteryOptimizationHint() {
 
 // ── Notification banner ───────────────────────────────────────────────────────
 
-type NotifPlatform = "ios" | "android" | "desktop";
-
-function detectNotifPlatform(): NotifPlatform {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent;
-  if (/iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream) return "ios";
-  if (/Android/i.test(ua)) return "android";
-  return "desktop";
-}
-
-const NOTIF_FIX_INSTRUCTIONS: Record<NotifPlatform, string> = {
-  android: isCapacitorNative()
-    ? 'Open Settings → Apps → OMT Pulse → Notifications → Allow. Then return here — the warning will clear automatically.'
-    : 'Open Settings → Apps → Chrome (or your browser) → Permissions → Notifications → Allow. Then return here — the warning will clear automatically.',
-  ios:
-    'Open Settings → scroll to your browser (Chrome or Safari) → Notifications → Allow. Then return here — the warning will clear automatically.',
-  desktop:
-    'Click the lock icon in the address bar → Site settings → Notifications → Allow. Then return here — the warning will clear automatically.',
-};
-
-function NotificationBanner({ onEnable, denied }: { onEnable: () => void; denied: boolean }) {
-  if (denied) {
-    const platform = detectNotifPlatform();
-    return (
-      <div className="shrink-0 bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 flex items-center justify-between gap-3 text-sm" data-testid="banner-push-notifications">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="relative shrink-0 flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500" />
-          </span>
-          <span className="font-semibold text-amber-700 dark:text-amber-400 shrink-0">Alerts blocked</span>
-          <span className="text-amber-700/80 dark:text-amber-400/80 hidden sm:inline truncate">
-            — notifications are blocked on this device.
-          </span>
-        </div>
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 transition-colors font-medium px-3 rounded hover:bg-amber-500/10 shrink-0 min-h-[44px]"
-              style={{ touchAction: "manipulation" }}
-              data-testid="button-fix-notifications"
-            >
-              <HelpCircle className="h-3.5 w-3.5" />
-              How to fix
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 p-4 space-y-3" data-testid="popover-notification-help">
-            <p className="text-sm font-semibold flex items-center gap-1.5">
-              <Bell className="h-4 w-4 text-primary" />
-              Re-enable Notifications
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {NOTIF_FIX_INSTRUCTIONS[platform]}
-            </p>
-          </PopoverContent>
-        </Popover>
-      </div>
-    );
-  }
-
+function NotificationBanner({ onEnable, denied, enabling }: { onEnable: () => void; denied: boolean; enabling?: boolean }) {
   return (
-    <div className="shrink-0 bg-white dark:bg-card border-b border-red-500/40 px-4 py-2.5 flex items-center justify-between gap-3 text-sm" data-testid="banner-push-notifications">
+    <div
+      className={`shrink-0 px-4 py-2.5 flex items-center justify-between gap-3 text-sm ${
+        denied
+          ? "bg-amber-500/15 border-b border-amber-500/40"
+          : "bg-white dark:bg-card border-b border-red-500/40"
+      }`}
+      data-testid="banner-push-notifications"
+    >
       <div className="flex items-center gap-2.5 min-w-0">
         <span className="relative shrink-0 flex h-3 w-3">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600" />
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${denied ? "bg-amber-400" : "bg-red-500"}`} />
+          <span className={`relative inline-flex rounded-full h-3 w-3 ${denied ? "bg-amber-500" : "bg-red-600"}`} />
         </span>
-        <span className="font-bold text-red-600 shrink-0">🚨 Alerts OFF</span>
-        <span className="text-red-600/75 hidden sm:inline truncate">
-          — you won't receive Panic or Live Incident dispatches on this device
+        <span className={`font-bold shrink-0 ${denied ? "text-amber-700 dark:text-amber-400" : "text-red-600"}`}>
+          {denied ? "Alerts blocked" : "🚨 Alerts OFF"}
+        </span>
+        <span className={`hidden sm:inline truncate ${denied ? "text-amber-700/80 dark:text-amber-400/80" : "text-red-600/75"}`}>
+          {denied
+            ? "— notifications are blocked on this device."
+            : "— you won't receive Panic or Live Incident dispatches on this device"}
         </span>
       </div>
       <Button
         size="sm"
-        className="min-h-[36px] px-4 text-xs font-bold bg-red-600 text-white hover:bg-red-700 border-0 shrink-0 touch-manipulation"
+        className={`min-h-[36px] px-4 text-xs font-bold border-0 shrink-0 touch-manipulation ${
+          denied
+            ? "bg-amber-600 text-white hover:bg-amber-700"
+            : "bg-red-600 text-white hover:bg-red-700"
+        }`}
         onClick={onEnable}
+        disabled={enabling}
         data-testid="button-enable-notifications"
       >
-        Enable Now
+        {enabling ? "Enabling…" : denied ? "Enable alerts" : "Enable Now"}
       </Button>
     </div>
   );
 }
 
-function NativePushBanner({ fcmState }: { fcmState: FcmState }) {
-  if (fcmState !== "denied" && fcmState !== "error") return null;
+function NativePushBanner({
+  fcmState,
+  onEnable,
+  enabling,
+}: {
+  fcmState: NativePushStatus;
+  onEnable: () => void;
+  enabling: boolean;
+}) {
+  if (fcmState === "granted" || fcmState === "unknown") return null;
 
   return (
     <div
@@ -437,32 +429,18 @@ function NativePushBanner({ fcmState }: { fcmState: FcmState }) {
         </span>
         <span className="font-semibold text-amber-700 dark:text-amber-400 shrink-0">Alerts off</span>
         <span className="text-amber-700/80 dark:text-amber-400/80 hidden sm:inline truncate">
-          — panic and live incident alerts won&apos;t reach this device.
+          — tap Enable to turn on panic and live incident alerts.
         </span>
       </div>
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 transition-colors font-medium px-3 rounded hover:bg-amber-500/10 shrink-0 min-h-[44px]"
-            style={{ touchAction: "manipulation" }}
-            data-testid="button-fix-native-notifications"
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-            How to fix
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-80 p-4 space-y-3" data-testid="popover-native-notification-help">
-          <p className="text-sm font-semibold flex items-center gap-1.5">
-            <Bell className="h-4 w-4 text-primary" />
-            Enable notifications for OMT Pulse
-          </p>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Open <strong>Settings → Apps → OMT Pulse → Notifications</strong> and turn notifications on.
-            {fcmState === "error" ? " If they are already on, force-close the app and reopen it." : ""}
-          </p>
-        </PopoverContent>
-      </Popover>
+      <Button
+        size="sm"
+        className="min-h-[36px] px-4 text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 border-0 shrink-0 touch-manipulation"
+        onClick={onEnable}
+        disabled={enabling}
+        data-testid="button-enable-native-notifications"
+      >
+        {enabling ? "Enabling…" : fcmState === "error" ? "Try again" : "Enable alerts"}
+      </Button>
     </div>
   );
 }
@@ -565,7 +543,7 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
   const pwa = usePwaInstall();
   const nativeApp = isCapacitorNative();
   const { subState: pushSubState, subscribe: subscribePush } = usePushSubscription(user.id);
-  const { fcmState } = useCapacitorPush(user.id);
+  const { fcmState, enablePush, enabling: enablingNativePush } = useCapacitorPush(user.id);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -905,7 +883,7 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
             </div>
           )}
           {nativeApp ? (
-            <NativePushBanner fcmState={fcmState} />
+            <NativePushBanner fcmState={fcmState} onEnable={enablePush} enabling={enablingNativePush} />
           ) : (
             <>
               {(pushSubState === "not-subscribed" || pushSubState === "denied") &&

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Bell, BellOff, CheckCircle2, Smartphone, Monitor, Apple, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
+import { enableNativePush } from "@/lib/native-push";
 import omtLogo from "@/assets/omt-logo-v2.png";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -184,43 +185,7 @@ export default function EnableAlertsPage() {
   }, [nativeApp]);
 
   async function handleEnableNative() {
-    const { PushNotifications } = await import("@capacitor/push-notifications");
-    const permResult = await PushNotifications.requestPermissions();
-    if (permResult.receive !== "granted") {
-      setError("Notifications were not allowed. Open Settings → Apps → OMT Pulse → Notifications and turn them on, then try again.");
-      return;
-    }
-
-    const token = await new Promise<string>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error("FCM registration timed out")), 15000);
-      let regHandle: { remove: () => void } | null = null;
-      let errHandle: { remove: () => void } | null = null;
-      const cleanup = () => {
-        window.clearTimeout(timeout);
-        regHandle?.remove();
-        errHandle?.remove();
-      };
-      void PushNotifications.addListener("registration", (tokenData) => {
-        cleanup();
-        resolve(tokenData.value);
-      }).then((h) => { regHandle = h; });
-      void PushNotifications.addListener("registrationError", () => {
-        cleanup();
-        reject(new Error("FCM registration failed"));
-      }).then((h) => { errHandle = h; });
-      PushNotifications.register().catch((e) => {
-        cleanup();
-        reject(e);
-      });
-    });
-
-    const res = await fetch("/api/push/register-fcm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ token }),
-    });
-    if (!res.ok) throw new Error("Server rejected FCM token");
+    await enableNativePush();
     setDone(true);
   }
 
@@ -269,7 +234,7 @@ export default function EnableAlertsPage() {
       setDone(true);
     } catch {
       setError(nativeApp
-        ? "Something went wrong registering this device. Make sure you're logged in, then try again."
+        ? "Notifications were not allowed. Open Settings → Apps → OMT Pulse → Notifications, turn them on, then tap Enable again."
         : "Something went wrong. Make sure you're logged in to OMT Pulse, then try again.");
     } finally {
       setBusy(false);
