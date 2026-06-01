@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -8,7 +9,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { User, Car } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Camera, Car, Loader2, Upload, User, X } from "lucide-react";
+import { prepareAndUploadFile, UploadValidationError } from "@/lib/upload-media";
+import { useToast } from "@/hooks/use-toast";
 
 export const PERSON_FIELD_KEYS = [
   "personInvolved",
@@ -17,6 +21,7 @@ export const PERSON_FIELD_KEYS = [
   "personGender",
   "personApproxAge",
   "personDescription",
+  "personPhotoUrls",
 ] as const;
 
 export const VEHICLE_FIELD_KEYS = [
@@ -25,6 +30,7 @@ export const VEHICLE_FIELD_KEYS = [
   "vehicleColour",
   "vehicleRegistration",
   "vehicleDescription",
+  "vehiclePhotoUrls",
 ] as const;
 
 export const INVOLVEMENT_FIELD_KEYS = new Set<string>([
@@ -33,6 +39,28 @@ export const INVOLVEMENT_FIELD_KEYS = new Set<string>([
 ]);
 
 export type InvolvementValues = Record<string, string | number | null | undefined>;
+
+const MAX_INVOLVEMENT_PHOTOS = 5;
+
+export function parsePhotoUrls(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+    } catch {
+      if (trimmed.startsWith("http") || trimmed.startsWith("/")) return [trimmed];
+    }
+  }
+  return [];
+}
+
+function serializePhotoUrls(urls: string[]): string | null {
+  return urls.length > 0 ? JSON.stringify(urls) : null;
+}
 
 export function readInvolvement(customFields: InvolvementValues | null | undefined) {
   const cf = customFields ?? {};
@@ -44,10 +72,12 @@ export function readInvolvement(customFields: InvolvementValues | null | undefin
     personGender: String(cf.personGender ?? ""),
     personApproxAge: String(cf.personApproxAge ?? ""),
     personDescription: String(cf.personDescription ?? ""),
+    personPhotoUrls: parsePhotoUrls(cf.personPhotoUrls),
     vehicleType: String(cf.vehicleType ?? ""),
     vehicleColour: String(cf.vehicleColour ?? ""),
     vehicleRegistration: String(cf.vehicleRegistration ?? ""),
     vehicleDescription: String(cf.vehicleDescription ?? ""),
+    vehiclePhotoUrls: parsePhotoUrls(cf.vehiclePhotoUrls),
   };
 }
 
@@ -81,10 +111,10 @@ export function hasInvolvementData(customFields: InvolvementValues | null | unde
   const inv = readInvolvement(customFields);
   if (!inv.personInvolved && !inv.vehicleInvolved) return false;
   if (inv.personInvolved) {
-    if (inv.personRole || inv.personName || inv.personGender || inv.personApproxAge || inv.personDescription) return true;
+    if (inv.personRole || inv.personName || inv.personGender || inv.personApproxAge || inv.personDescription || inv.personPhotoUrls.length > 0) return true;
   }
   if (inv.vehicleInvolved) {
-    if (inv.vehicleType || inv.vehicleColour || inv.vehicleRegistration || inv.vehicleDescription) return true;
+    if (inv.vehicleType || inv.vehicleColour || inv.vehicleRegistration || inv.vehicleDescription || inv.vehiclePhotoUrls.length > 0) return true;
   }
   return inv.personInvolved || inv.vehicleInvolved;
 }
@@ -125,6 +155,9 @@ export function IncidentInvolvementSummary({
             <DetailRow label="Approx. age" value={inv.personApproxAge} />
           </div>
           <DetailRow label="Appearance" value={inv.personDescription} />
+          {inv.personPhotoUrls.length > 0 && (
+            <InvolvementPhotoGrid urls={inv.personPhotoUrls} readOnly testIdPrefix="summary-person" />
+          )}
         </div>
       )}
       {inv.vehicleInvolved && (
@@ -139,6 +172,9 @@ export function IncidentInvolvementSummary({
             <DetailRow label="Registration" value={inv.vehicleRegistration} />
             <DetailRow label="Make / model" value={inv.vehicleDescription} />
           </div>
+          {inv.vehiclePhotoUrls.length > 0 && (
+            <InvolvementPhotoGrid urls={inv.vehiclePhotoUrls} readOnly testIdPrefix="summary-vehicle" />
+          )}
         </div>
       )}
     </div>
@@ -164,6 +200,147 @@ function clearVehicleFields(current: InvolvementValues): InvolvementValues {
   return next;
 }
 
+function InvolvementPhotoGrid({
+  urls,
+  readOnly = false,
+  onRemove,
+  testIdPrefix,
+}: {
+  urls: string[];
+  readOnly?: boolean;
+  onRemove?: (index: number) => void;
+  testIdPrefix: string;
+}) {
+  if (urls.length === 0) return null;
+  return (
+    <div className={`grid gap-2 ${readOnly ? "grid-cols-3 sm:grid-cols-4" : "grid-cols-3"}`}>
+      {urls.map((url, i) => (
+        <div key={`${url}-${i}`} className="relative aspect-square rounded-md border overflow-hidden bg-muted">
+          <img src={url} alt="" className="w-full h-full object-cover" />
+          {!readOnly && onRemove && (
+            <button
+              type="button"
+              onClick={() => onRemove(i)}
+              className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-0.5"
+              data-testid={`${testIdPrefix}-photo-remove-${i}`}
+              aria-label="Remove photo"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InvolvementPhotoPicker({
+  urls,
+  onChange,
+  testIdPrefix,
+  label,
+}: {
+  urls: string[];
+  onChange: (urls: string[]) => void;
+  testIdPrefix: string;
+  label: string;
+}) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFiles(files: FileList | File[]) {
+    const remaining = MAX_INVOLVEMENT_PHOTOS - urls.length;
+    if (remaining <= 0) {
+      toast({ title: "Photo limit reached", description: `Maximum ${MAX_INVOLVEMENT_PHOTOS} photos per section.`, variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const next = [...urls];
+      for (const file of Array.from(files).slice(0, remaining)) {
+        if (!file.type.startsWith("image/")) {
+          toast({ title: "Images only", description: "Please choose a photo file.", variant: "destructive" });
+          continue;
+        }
+        const { objectUrl } = await prepareAndUploadFile(file, { preset: "evidence" });
+        next.push(objectUrl);
+      }
+      onChange(next);
+    } catch (err) {
+      toast({
+        title: "Upload failed",
+        description: err instanceof UploadValidationError ? err.message : err instanceof Error ? err.message : "Could not upload photo",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 pt-1">
+      <Label className="text-xs">{label}</Label>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        data-testid={`${testIdPrefix}-photo-file`}
+        onChange={(e) => {
+          if (e.target.files?.length) void handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        data-testid={`${testIdPrefix}-photo-camera`}
+        onChange={(e) => {
+          if (e.target.files?.length) void handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1.5 h-8 text-xs"
+          disabled={uploading || urls.length >= MAX_INVOLVEMENT_PHOTOS}
+          onClick={() => cameraInputRef.current?.click()}
+          data-testid={`${testIdPrefix}-take-photo`}
+        >
+          {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+          Take photo
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1.5 h-8 text-xs"
+          disabled={uploading || urls.length >= MAX_INVOLVEMENT_PHOTOS}
+          onClick={() => fileInputRef.current?.click()}
+          data-testid={`${testIdPrefix}-upload-photo`}
+        >
+          {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+          Upload photo
+        </Button>
+      </div>
+      <InvolvementPhotoGrid
+        urls={urls}
+        testIdPrefix={testIdPrefix}
+        onRemove={(index) => onChange(urls.filter((_, i) => i !== index))}
+      />
+    </div>
+  );
+}
+
 type Props = {
   customFields: InvolvementValues;
   onChange: (next: InvolvementValues) => void;
@@ -181,8 +358,14 @@ export function IncidentInvolvementSection({
   onPersonInvolvedChange,
   onVehicleInvolvedChange,
 }: Props) {
+  const inv = readInvolvement(customFields);
+
   const setField = (key: string, value: string) => {
     onChange(patchCustomFields(customFields, { [key]: value || null }));
+  };
+
+  const setPhotoUrls = (key: "personPhotoUrls" | "vehiclePhotoUrls", urls: string[]) => {
+    onChange(patchCustomFields(customFields, { [key]: serializePhotoUrls(urls) }));
   };
 
   return (
@@ -296,6 +479,12 @@ export function IncidentInvolvementSection({
               data-testid="input-person-description"
             />
           </div>
+          <InvolvementPhotoPicker
+            label="Photos"
+            testIdPrefix="person"
+            urls={inv.personPhotoUrls}
+            onChange={(urls) => setPhotoUrls("personPhotoUrls", urls)}
+          />
         </div>
       )}
 
@@ -349,6 +538,12 @@ export function IncidentInvolvementSection({
               />
             </div>
           </div>
+          <InvolvementPhotoPicker
+            label="Photos"
+            testIdPrefix="vehicle"
+            urls={inv.vehiclePhotoUrls}
+            onChange={(urls) => setPhotoUrls("vehiclePhotoUrls", urls)}
+          />
         </div>
       )}
     </div>
