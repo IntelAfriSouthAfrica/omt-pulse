@@ -6,6 +6,7 @@ import {
   type Incident, type InsertIncident,
   type FormField, type InsertFormField,
   type Attachment, type InsertAttachment, type AttachmentWithUploader,
+  type EvidenceNote, type InsertEvidenceNote, type EvidenceNoteWithAuthor,
   type AuditLog, type InsertAuditLog,
   type CustomMap, type InsertCustomMap,
   type ImportBatch, type InsertImportBatch,
@@ -15,7 +16,7 @@ import {
   type Command, type InsertCommand, type CommandUser,
   type CommandVisibilityGrant, type InsertCommandVisibilityGrant,
   type CommandVisibilityRequest, type InsertCommandVisibilityRequest,
-  users, organizations, locations, incidentCategories, incidents, formFields, userLocationAssignments, incidentAttachments, auditLogs, customMaps, importBatches, pushSubscriptions, notificationLogs, liveResponders, chatMessages, chatReads, panicAcknowledgers, fcmTokens,
+  users, organizations, locations, incidentCategories, incidents, formFields, userLocationAssignments, incidentAttachments, incidentEvidenceNotes, auditLogs, customMaps, importBatches, pushSubscriptions, notificationLogs, liveResponders, chatMessages, chatReads, panicAcknowledgers, fcmTokens,
   commands, commandUsers, commandVisibilityGrants, commandVisibilityRequests,
 } from "@shared/schema";
 
@@ -155,6 +156,12 @@ export interface IStorage {
   createAttachment(data: InsertAttachment & { uploadedByUserId?: string | null }): Promise<Attachment>;
   deleteAttachment(id: number, orgId: string): Promise<boolean>;
   getAttachmentCountsByOrg(orgId: string): Promise<Record<number, number>>;
+
+  // Post-incident text evidence notes (org-scoped)
+  getEvidenceNotesByIncident(incidentId: number, orgId: string): Promise<EvidenceNoteWithAuthor[]>;
+  getEvidenceNote(id: number, orgId: string): Promise<EvidenceNote | undefined>;
+  createEvidenceNote(data: InsertEvidenceNote & { authorUserId?: string | null }): Promise<EvidenceNote>;
+  deleteEvidenceNote(id: number, orgId: string): Promise<boolean>;
 
   // Custom Maps (org-scoped)
   getCustomMaps(orgId: string, commandFilter?: number[]): Promise<CustomMap[]>;
@@ -1186,6 +1193,39 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAttachment(id: number, orgId: string): Promise<boolean> {
     await db.delete(incidentAttachments).where(and(eq(incidentAttachments.id, id), eq(incidentAttachments.organizationId, orgId)));
+    return true;
+  }
+
+  async getEvidenceNotesByIncident(incidentId: number, orgId: string): Promise<EvidenceNoteWithAuthor[]> {
+    return db.select({
+      id: incidentEvidenceNotes.id,
+      incidentId: incidentEvidenceNotes.incidentId,
+      organizationId: incidentEvidenceNotes.organizationId,
+      authorUserId: incidentEvidenceNotes.authorUserId,
+      body: incidentEvidenceNotes.body,
+      createdAt: incidentEvidenceNotes.createdAt,
+      authorFirstName: users.firstName,
+      authorLastName: users.lastName,
+    })
+      .from(incidentEvidenceNotes)
+      .leftJoin(users, eq(incidentEvidenceNotes.authorUserId, users.id))
+      .where(and(eq(incidentEvidenceNotes.incidentId, incidentId), eq(incidentEvidenceNotes.organizationId, orgId)))
+      .orderBy(asc(incidentEvidenceNotes.createdAt));
+  }
+
+  async getEvidenceNote(id: number, orgId: string): Promise<EvidenceNote | undefined> {
+    const [note] = await db.select().from(incidentEvidenceNotes)
+      .where(and(eq(incidentEvidenceNotes.id, id), eq(incidentEvidenceNotes.organizationId, orgId)));
+    return note;
+  }
+
+  async createEvidenceNote(data: InsertEvidenceNote & { authorUserId?: string | null }): Promise<EvidenceNote> {
+    const [created] = await db.insert(incidentEvidenceNotes).values(data).returning();
+    return created;
+  }
+
+  async deleteEvidenceNote(id: number, orgId: string): Promise<boolean> {
+    await db.delete(incidentEvidenceNotes).where(and(eq(incidentEvidenceNotes.id, id), eq(incidentEvidenceNotes.organizationId, orgId)));
     return true;
   }
 

@@ -185,6 +185,18 @@ app.use((req, res, next) => {
   await safeMigrate("panic_acknowledgers.incident_idx", sql`CREATE INDEX IF NOT EXISTS panic_ack_incident_idx ON panic_acknowledgers (incident_id)`);
   await safeMigrate("panic_acknowledgers.org_idx", sql`CREATE INDEX IF NOT EXISTS panic_ack_org_idx ON panic_acknowledgers (organization_id)`);
 
+  await safeMigrate("incident_evidence_notes.create", sql`
+    CREATE TABLE IF NOT EXISTS incident_evidence_notes (
+      id SERIAL PRIMARY KEY,
+      incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+      organization_id VARCHAR NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      author_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await safeMigrate("incident_evidence_notes.incident_idx", sql`CREATE INDEX IF NOT EXISTS incident_evidence_notes_incident_idx ON incident_evidence_notes (incident_id)`);
+
   // Organizations — contract / billing config columns (Task #254)
   await safeMigrate("organizations.contract_ref", sql`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS contract_ref VARCHAR`);
   await safeMigrate("organizations.contract_start_date", sql`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS contract_start_date DATE`);

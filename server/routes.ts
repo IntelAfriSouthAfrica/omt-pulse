@@ -3228,6 +3228,56 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  const evidenceNoteBodySchema = z.object({
+    body: z.string().trim().min(1).max(2000),
+  });
+
+  app.get("/api/incidents/:id/evidence-notes", async (req, res) => {
+    const orgId = req.currentUser!.organizationId;
+    const incidentId = parseInt(req.params.id as string);
+    const inc = await verifyIncidentAccess(req, res, incidentId);
+    if (!inc) return;
+    const notes = await storage.getEvidenceNotesByIncident(incidentId, orgId);
+    res.json(notes);
+  });
+
+  app.post("/api/incidents/:id/evidence-notes", async (req, res) => {
+    const orgId = req.currentUser!.organizationId;
+    const { role, id: userId } = req.currentUser!;
+    if (!["administrator", "supervisor", "reporter"].includes(role)) {
+      return res.status(403).json({ message: "You do not have permission to add evidence" });
+    }
+    const incidentId = parseInt(req.params.id as string);
+    const inc = await verifyIncidentAccess(req, res, incidentId);
+    if (!inc) return;
+    if (!(await assertWriteCommandAccess(req, (inc as any).commandId))) {
+      return res.status(403).json({ message: "Cross-Command visibility is read-only" });
+    }
+    const parsed = evidenceNoteBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "A note between 1 and 2000 characters is required" });
+    const note = await storage.createEvidenceNote({
+      incidentId,
+      organizationId: orgId,
+      authorUserId: userId,
+      body: parsed.data.body,
+    });
+    res.json(note);
+  });
+
+  app.delete("/api/evidence-notes/:id", async (req, res) => {
+    const orgId = req.currentUser!.organizationId;
+    if (req.currentUser!.role !== "administrator") {
+      return res.status(403).json({ message: "Only administrators can delete evidence notes" });
+    }
+    const id = parseInt(req.params.id as string);
+    const note = await storage.getEvidenceNote(id, orgId);
+    if (!note) return res.status(404).json({ message: "Note not found" });
+    const inc = await verifyIncidentAccess(req, res, note.incidentId);
+    if (!inc) return;
+    await storage.deleteEvidenceNote(id, orgId);
+    res.json({ success: true });
+  });
+
   // Dashboard summary
   app.get("/api/dashboard", async (req, res) => {
     const { organizationId: orgId, role, id: userId } = req.currentUser!;

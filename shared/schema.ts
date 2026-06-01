@@ -280,6 +280,28 @@ export type AttachmentWithUploader = Attachment & {
   uploadedByLastName: string | null;
 };
 
+export const incidentEvidenceNotes = pgTable("incident_evidence_notes", {
+  id: serial("id").primaryKey(),
+  incidentId: integer("incident_id").notNull().references(() => incidents.id, { onDelete: "cascade" }),
+  organizationId: varchar("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertEvidenceNoteSchema = createInsertSchema(incidentEvidenceNotes).omit({
+  id: true,
+  createdAt: true,
+  authorUserId: true,
+});
+export type InsertEvidenceNote = z.infer<typeof insertEvidenceNoteSchema>;
+export type EvidenceNote = typeof incidentEvidenceNotes.$inferSelect;
+
+export type EvidenceNoteWithAuthor = EvidenceNote & {
+  authorFirstName: string | null;
+  authorLastName: string | null;
+};
+
 export const formFields = pgTable("form_fields", {
   id: serial("id").primaryKey(),
   organizationId: varchar("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
