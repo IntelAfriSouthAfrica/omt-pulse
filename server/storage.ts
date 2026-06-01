@@ -190,6 +190,8 @@ export interface IStorage {
   upsertPushSubscription(orgId: string, userId: string, sub: { endpoint: string; p256dh: string; auth: string }): Promise<void>;
   deletePushSubscription(endpoint: string): Promise<void>;
   deletePushSubscriptionByUser(endpoint: string, userId: string): Promise<void>;
+  /** Remove browser push endpoints when the user switches to the native app (FCM). */
+  deleteAllPushSubscriptionsByUser(userId: string): Promise<void>;
   getPushSubscriptionsByOrg(orgId: string, excludeUserId?: string, roles?: string[], commandIds?: number[]): Promise<Array<{ endpoint: string; p256dh: string; auth: string; userId: string }>>;
   getPushSubscriptionsByUser(userId: string): Promise<Array<{ endpoint: string; p256dh: string; auth: string }>>;
   getOrgPushSubscribedUserIds(orgId: string): Promise<Set<string>>;
@@ -1568,6 +1570,18 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
+  async deleteAllPushSubscriptionsByUser(userId: string): Promise<void> {
+    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+  }
+
+  private async fcmUserIdsInOrg(orgId: string): Promise<Set<string>> {
+    const rows = await db
+      .selectDistinct({ userId: fcmTokens.userId })
+      .from(fcmTokens)
+      .where(eq(fcmTokens.organizationId, orgId));
+    return new Set(rows.map((r) => r.userId));
+  }
+
   async getPushSubscriptionsByOrg(orgId: string, excludeUserId?: string, roles?: string[], commandIds?: number[]): Promise<Array<{ endpoint: string; p256dh: string; auth: string; userId: string }>> {
     const conditions: ReturnType<typeof and>[] = [
       eq(pushSubscriptions.organizationId, orgId),
@@ -1593,7 +1607,8 @@ export class DatabaseStorage implements IStorage {
       .from(pushSubscriptions)
       .innerJoin(users, eq(pushSubscriptions.userId, users.id))
       .where(and(...conditions));
-    return subs;
+    const nativeUserIds = await this.fcmUserIdsInOrg(orgId);
+    return subs.filter((s) => !nativeUserIds.has(s.userId));
   }
 
   async countLiveIncidents(orgId: string): Promise<number> {
@@ -1665,6 +1680,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPushSubscriptionsByUser(userId: string): Promise<Array<{ endpoint: string; p256dh: string; auth: string }>> {
+    const native = await this.getFcmTokensByUser(userId);
+    if (native.length > 0) return [];
     return db.select({
       endpoint: pushSubscriptions.endpoint,
       p256dh: pushSubscriptions.p256dh,

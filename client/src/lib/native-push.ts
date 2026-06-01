@@ -1,5 +1,59 @@
 export type NativePushStatus = "unknown" | "needs-enable" | "denied" | "granted" | "error";
 
+const PENDING_PUSH_URL_KEY = "omt_pending_push_url";
+
+function pushDataUrl(data: Record<string, unknown> | undefined): string | null {
+  const url = data?.url;
+  return typeof url === "string" && url.startsWith("/") ? url : null;
+}
+
+/** Navigate when the user taps a native push notification (FCM). */
+export function setupNativePushDeepLinks(navigate: (path: string) => void): () => void {
+  let removeAction: (() => void) | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    const { Capacitor } = await import("@capacitor/core");
+    if (!Capacitor.isNativePlatform()) return;
+
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+
+    const go = (data: Record<string, unknown> | undefined) => {
+      const url = pushDataUrl(data);
+      if (!url) return;
+      try {
+        sessionStorage.setItem(PENDING_PUSH_URL_KEY, url);
+      } catch { /* ignore */ }
+      navigate(url);
+    };
+
+    const actionHandle = await PushNotifications.addListener(
+      "pushNotificationActionPerformed",
+      (event) => go(event.notification.data as Record<string, unknown>),
+    );
+    if (cancelled) {
+      actionHandle.remove();
+      return;
+    }
+    removeAction = () => actionHandle.remove();
+  })();
+
+  return () => {
+    cancelled = true;
+    removeAction?.();
+  };
+}
+
+/** Apply a deep link stored when the app opened from a notification before auth routed. */
+export function consumePendingPushDeepLink(navigate: (path: string) => void): void {
+  try {
+    const pending = sessionStorage.getItem(PENDING_PUSH_URL_KEY);
+    if (!pending) return;
+    sessionStorage.removeItem(PENDING_PUSH_URL_KEY);
+    navigate(pending);
+  } catch { /* ignore */ }
+}
+
 /** True when the server already has an FCM token stored for this user. */
 export async function fetchFcmRegisteredOnServer(): Promise<boolean> {
   try {

@@ -4,6 +4,8 @@ import {
   type NativePushStatus,
   enableNativePush,
   syncNativePushIfNeeded,
+  setupNativePushDeepLinks,
+  consumePendingPushDeepLink,
 } from "@/lib/native-push";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -532,6 +534,12 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
   const { subState: pushSubState, subscribe: subscribePush } = usePushSubscription(user.id);
   const { fcmState, enablePush, enabling: enablingNativePush } = useCapacitorPush(user.id);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!nativeApp) return;
+    consumePendingPushDeepLink(navigate);
+    return setupNativePushDeepLinks(navigate);
+  }, [nativeApp, navigate]);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [notifSheetOpen, setNotifSheetOpen] = useState(false);

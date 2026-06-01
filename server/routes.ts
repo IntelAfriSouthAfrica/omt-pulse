@@ -743,12 +743,17 @@ export async function registerRoutes(
       return res.status(400).json({ message: "token required" });
     }
     await storage.upsertFcmToken(orgId, userId, token);
+    // Drop stale Chrome/PWA subscriptions so the user only gets native notifications.
+    await storage.deleteAllPushSubscriptionsByUser(userId);
     res.json({ ok: true });
   });
 
   app.get("/api/push/fcm-status", async (req, res) => {
     const { id: userId } = req.currentUser!;
     const tokens = await storage.getFcmTokensByUser(userId);
+    if (tokens.length > 0) {
+      await storage.deleteAllPushSubscriptionsByUser(userId);
+    }
     res.json({ registered: tokens.length > 0 });
   });
 
@@ -3003,17 +3008,25 @@ export async function registerRoutes(
       const destBody = `${firstName} is navigating to ${destDisplay}.`;
       const navRoles = incident.severity === "yellow" ? ["administrator"] : ["administrator", "supervisor", "reporter"];
       const subs = await storage.getPushSubscriptionsByOrg(orgId, triggerUserId, navRoles);
-      if (subs.length === 0) return;
-      const payload = JSON.stringify({ title: destTitle, body: destBody, url: "/live-monitor" });
+      const navUrl = `/live-monitor?incidentId=${id}`;
+      const payload = JSON.stringify({ title: destTitle, body: destBody, url: navUrl });
       await Promise.allSettled(dedupeByEndpoint(subs).map(async (sub) => {
         try {
           await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, URGENT_PUSH);
-          storage.createNotificationLog({ organizationId: orgId, userId: sub.userId, title: destTitle, body: destBody, url: "/live-monitor", incidentId: id }).catch(() => {});
+          storage.createNotificationLog({ organizationId: orgId, userId: sub.userId, title: destTitle, body: destBody, url: navUrl, incidentId: id }).catch(() => {});
         } catch (err: unknown) {
           const code = typeof err === "object" && err !== null && "statusCode" in err ? (err as { statusCode: number }).statusCode : 0;
           if (code === 410 || code === 404) storage.deletePushSubscription(sub.endpoint);
         }
       }));
+      storage.getFcmTokensByOrg(orgId, triggerUserId, navRoles).then((fcmSubs) => {
+        if (fcmSubs.length === 0) return;
+        sendFcmBatch(fcmSubs.map((s) => s.token), {
+          title: destTitle,
+          body: destBody,
+          data: { type: "incident_update", incidentId: String(id), url: navUrl },
+        }).catch(() => {});
+      }).catch(() => {});
     })().catch(() => {});
   });
 
