@@ -46,6 +46,18 @@ public class MainActivity extends BridgeActivity {
         }
 
         // Bridge WebView getUserMedia (voice notes, camera) to Android runtime permissions.
+        // Must run in onStart — Capacitor may replace the WebChromeClient during bridge init.
+        installMediaPermissionWebChromeClient();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        installMediaPermissionWebChromeClient();
+    }
+
+    private void installMediaPermissionWebChromeClient() {
+        if (this.bridge == null || this.bridge.getWebView() == null) return;
         this.bridge.getWebView().setWebChromeClient(new BridgeWebChromeClient(this.bridge) {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {

@@ -22,6 +22,12 @@ import { MessageSquare, Send, Plus, Search, Users, ArrowLeft, ImageIcon, Camera,
 import { cn } from "@/lib/utils";
 import { MAX_VOICE_SECONDS, uploadFile, UploadValidationError } from "@/lib/upload-media";
 import { nativeMicDeniedHint } from "@/lib/native-mic-hint";
+import {
+  createAudioMediaRecorder,
+  openMicStream,
+  recorderMimeType,
+  recordingErrorMessage,
+} from "@/lib/voice-recorder";
 
 type ChatMessage = {
   id: number;
@@ -425,30 +431,19 @@ export default function ChatPage() {
     setShowAttachMenu(false);
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await openMicStream();
       recordingStreamRef.current = stream;
-      const supportedType = ["audio/webm", "audio/ogg", "audio/mp4"].find((t) =>
-        MediaRecorder.isTypeSupported(t),
-      );
-      if (!supportedType) {
-        stopRecordingTracks();
-        toast({
-          title: "Recording not supported",
-          description: "Your browser does not support audio recording.",
-          variant: "destructive",
-        });
-        return;
-      }
       audioChunksRef.current = [];
-      const recorder = new MediaRecorder(stream, { mimeType: supportedType });
+      const recorder = createAudioMediaRecorder(stream);
+      const mimeType = recorderMimeType(recorder);
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
         stopRecordingTracks();
-        const blob = new Blob(audioChunksRef.current, { type: supportedType });
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
         if (blob.size > 0) {
-          uploadAndSendVoice(blob, supportedType);
+          uploadAndSendVoice(blob, mimeType);
         }
         mediaRecorderRef.current = null;
         setIsRecording(false);
@@ -471,12 +466,10 @@ export default function ChatPage() {
       stopRecordingTracks();
       setIsRecording(false);
       setRecordingSeconds(0);
-      const isDenied = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+      const { title, description } = recordingErrorMessage(err);
       toast({
-        title: isDenied ? "Microphone access denied" : "Recording failed",
-        description: isDenied
-          ? nativeMicDeniedHint()
-          : "Could not start recording. Please try again.",
+        title,
+        description: description === "mic-denied" ? nativeMicDeniedHint() : description,
         variant: "destructive",
       });
     }
