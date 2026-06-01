@@ -9,6 +9,7 @@ type IncidentWithCount = Incident & { attachmentCount: number };
 import { IncidentDialog, AttachmentsDialog } from "@/components/incident-dialog";
 import { OccurrenceBookDesktopTable } from "@/components/occurrence-book-desktop-table";
 import { IncidentEvidenceSection } from "@/components/incident-evidence-section";
+import { IncidentInvolvementSummary } from "@/components/incident-involvement-section";
 import { IncidentLogMobileList } from "@/components/incident-log-mobile";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -874,6 +875,8 @@ export default function OccurrenceBook() {
                       <p className="text-sm mt-0.5 whitespace-pre-wrap">{inc.description}</p>
                     </div>
                   )}
+
+                  <IncidentInvolvementSummary customFields={inc.customFields as Record<string, string | number | null>} />
 
                   {inc.customFields && visibleCustomFields.length > 0 && (
                     visibleCustomFields
