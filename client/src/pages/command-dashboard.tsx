@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { Location } from "@shared/schema";
@@ -17,6 +17,8 @@ import {
   Siren,
   MessageSquare,
   Navigation,
+  MapPin,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -38,6 +40,14 @@ type LiveIncidentRow = {
   locationId: number | null;
   locationName: string | null;
   destinationName: string | null;
+  destinationLat?: number | string | null;
+  destinationLng?: number | string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  liveStartLat?: number | string | null;
+  liveStartLng?: number | string | null;
+  responderLat?: number | string | null;
+  responderLng?: number | string | null;
   liveStartedAt: string | null;
   responderFirstName: string | null;
   responderLastName: string | null;
@@ -51,6 +61,49 @@ type LiveIncidentRow = {
     arrivedAt: string | null;
   }>;
 };
+
+const FAR_JOIN_KM = 50;
+
+function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+function fmtDistanceKm(km: number): string {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+}
+
+function estimateDriveMinutes(km: number): number {
+  const roadKm = km * 1.25;
+  return Math.max(1, Math.round((roadKm / 55) * 60));
+}
+
+function getIncidentTarget(inc: LiveIncidentRow): { lat: number; lng: number } | null {
+  const pick = (lat: number | string | null | undefined, lng: number | string | null | undefined) => {
+    if (lat == null || lng == null) return null;
+    const la = Number(lat);
+    const ln = Number(lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+    return { lat: la, lng: ln };
+  };
+  return (
+    pick(inc.destinationLat, inc.destinationLng) ??
+    pick(inc.liveStartLat, inc.liveStartLng) ??
+    pick(inc.latitude, inc.longitude) ??
+    pick(inc.responderLat, inc.responderLng)
+  );
+}
 
 function severityBadgeClass(severity: string | null): string {
   if (severity === "red") {
@@ -82,6 +135,148 @@ function severityRowAccent(severity: string | null): string {
 function formatStarterName(inc: LiveIncidentRow): string | null {
   const name = [inc.responderFirstName, inc.responderLastName].filter(Boolean).join(" ").trim();
   return name || null;
+}
+
+function LiveIncidentDashboardRow({
+  inc,
+  locations,
+  currentUserId,
+  userPos,
+  gpsUnavailable,
+  isDispatch,
+  onOpen,
+}: {
+  inc: LiveIncidentRow;
+  locations: Location[];
+  currentUserId?: string;
+  userPos: { lat: number; lng: number } | null;
+  gpsUnavailable: boolean;
+  isDispatch: boolean;
+  onOpen: () => void;
+}) {
+  const locText =
+    inc.destinationName ||
+    inc.locationName ||
+    (inc.locationId ? locations.find((l) => l.id === inc.locationId)?.name : null) ||
+    "Location not set";
+  const startedMs = inc.liveStartedAt ? new Date(inc.liveStartedAt).getTime() : null;
+  const minsAgo = startedMs != null ? Math.max(0, Math.round((Date.now() - startedMs) / 60000)) : null;
+  const isMine = inc.userId === currentUserId;
+  const alreadyJoined = (inc.responders ?? []).some(
+    (r) => r.userId === currentUserId && !r.arrivedAt,
+  );
+  const starterName = formatStarterName(inc);
+  const rowAccent = severityRowAccent(inc.severity);
+  const target = getIncidentTarget(inc);
+  const distanceKm =
+    !isMine && !alreadyJoined && userPos && target
+      ? haversineKm(userPos, target)
+      : null;
+  const tooFar = distanceKm != null && distanceKm > FAR_JOIN_KM;
+  const categoryLabel = inc.categoryName ?? "Live incident";
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`w-full text-left px-4 py-3.5 hover:bg-muted/50 active:bg-muted/70 transition-colors touch-manipulation ${rowAccent}`}
+        data-testid={`row-live-incident-${inc.id}`}
+      >
+        <div className="flex items-start gap-3">
+          {inc.categoryColor ? (
+            <div
+              className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-sm"
+              style={{ backgroundColor: inc.categoryColor }}
+              aria-hidden
+            >
+              <Radio className="h-5 w-5 text-white" strokeWidth={2.25} />
+            </div>
+          ) : (
+            <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted">
+              <Radio className="h-5 w-5 text-muted-foreground" strokeWidth={2.25} />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-bold text-base leading-tight truncate">{categoryLabel}</p>
+                  {inc.severity && inc.severity !== "none" && (
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${severityBadgeClass(inc.severity)}`}
+                      data-testid={`badge-severity-live-${inc.id}`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${severityDotClass(inc.severity)} ${inc.severity === "red" ? "animate-pulse" : ""}`}
+                      />
+                      {inc.severity}
+                    </span>
+                  )}
+                  {inc.isEscalated && (
+                    <span className="inline-flex shrink-0 items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/25">
+                      ESCALATED
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">#{inc.id}</p>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+            </div>
+
+            {isMine ? (
+              <p className="text-sm font-medium text-primary mt-1">Your live incident</p>
+            ) : alreadyJoined ? (
+              <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-1">You're responding</p>
+            ) : starterName ? (
+              <p className="text-sm text-foreground/90 mt-1">
+                Logged by <span className="font-medium">{starterName}</span>
+              </p>
+            ) : null}
+
+            <p className="text-sm text-muted-foreground truncate mt-1 flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+              <span className="truncate">{locText}</span>
+            </p>
+
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {minsAgo != null && (
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  {minsAgo === 0 ? "Just started" : `${minsAgo} min ago`}
+                </span>
+              )}
+              {distanceKm != null && (
+                <span
+                  className={`inline-flex items-center gap-1 font-semibold tabular-nums ${
+                    tooFar ? "text-amber-700 dark:text-amber-400" : "text-foreground"
+                  }`}
+                  data-testid={`text-distance-live-${inc.id}`}
+                >
+                  <Navigation className="h-3 w-3 shrink-0" />
+                  {fmtDistanceKm(distanceKm)} away · ~{estimateDriveMinutes(distanceKm)} min drive
+                </span>
+              )}
+              {!isMine && !alreadyJoined && gpsUnavailable && target && (
+                <span className="text-muted-foreground">Enable location for distance</span>
+              )}
+            </div>
+
+            {tooFar && !isDispatch && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5 font-medium">
+                Far from you — joining may not be practical
+              </p>
+            )}
+            {!isMine && !alreadyJoined && distanceKm != null && !tooFar && (
+              <p className="text-[11px] text-green-700 dark:text-green-400 mt-1.5 font-medium">
+                Within reach — tap to join
+              </p>
+            )}
+          </div>
+        </div>
+      </button>
+    </li>
+  );
 }
 
 function ActionTile({
@@ -284,6 +479,26 @@ export default function CommandDashboard() {
     );
   }, [liveIncidents, isReporter, currentUser?.id]);
 
+  const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsUnavailable, setGpsUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (visibleLiveIncidents.length === 0 || typeof navigator === "undefined" || !navigator.geolocation) {
+      return;
+    }
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsUnavailable(false);
+      },
+      () => setGpsUnavailable(true),
+      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 12_000 },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [visibleLiveIncidents.length]);
+
+  const hasRedLive = visibleLiveIncidents.some((i) => i.severity === "red");
+
   function openIncidentsList() {
     navigate(`/occurrence-book?period=${period}`);
   }
@@ -430,24 +645,6 @@ export default function CommandDashboard() {
       </div>
 
       <div className="p-4 md:p-6 pt-1 pb-28 space-y-5 max-w-4xl mx-auto w-full">
-        {visibleLiveIncidents.some((i) => i.severity === "red") && (
-          <div
-            className="flex items-center gap-3 rounded-xl border-2 border-red-500/50 bg-red-500/10 px-4 py-3"
-            data-testid="banner-red-live-incident"
-          >
-            <span className="relative flex h-3 w-3 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-red-700 dark:text-red-400">
-                RED severity live incident{visibleLiveIncidents.filter((i) => i.severity === "red").length > 1 ? "s" : ""} active
-              </p>
-              <p className="text-xs text-muted-foreground">Review details below or open Live Monitor</p>
-            </div>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {isLoading ? (
             <>
@@ -480,94 +677,39 @@ export default function CommandDashboard() {
         </div>
 
         {visibleLiveIncidents.length > 0 && (
-          <Card>
+          <Card className={hasRedLive ? "border-red-500/40 shadow-sm" : undefined}>
             <CardHeader className="pb-2 pt-4 px-4">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${hasRedLive ? "bg-red-500" : "bg-green-500"}`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${hasRedLive ? "bg-red-500" : "bg-green-500"}`}
+                  />
                 </span>
-                <CardTitle className="text-sm font-semibold">Active Live Incidents</CardTitle>
+                <CardTitle className={`text-sm font-semibold ${hasRedLive ? "text-red-700 dark:text-red-400" : ""}`}>
+                  {hasRedLive ? "RED live incident active" : "Active Live Incidents"}
+                </CardTitle>
                 <span className="ml-auto text-[10px] text-muted-foreground uppercase tracking-wide">
-                  {isDispatch ? "Tap → Live Monitor" : "Tap → open"}
+                  {isDispatch ? "Tap → Live Monitor" : "Tap to join"}
                 </span>
               </div>
             </CardHeader>
             <CardContent className="px-0 pb-0">
               <ul className="divide-y divide-border">
-                {visibleLiveIncidents.map((inc) => {
-                  const locText =
-                    inc.destinationName ||
-                    inc.locationName ||
-                    (inc.locationId ? locations.find((l) => l.id === inc.locationId)?.name : null) ||
-                    "Unknown location";
-                  const startedMs = inc.liveStartedAt ? new Date(inc.liveStartedAt).getTime() : null;
-                  const minsAgo = startedMs != null ? Math.max(0, Math.round((Date.now() - startedMs) / 60000)) : null;
-                  const isMine = inc.userId === currentUser?.id;
-                  const starterName = formatStarterName(inc);
-                  const rowAccent = severityRowAccent(inc.severity);
-                  return (
-                    <li key={inc.id}>
-                      <button
-                        type="button"
-                        onClick={() => openLiveIncidentRow(inc)}
-                        className={`w-full text-left px-4 py-3 hover:bg-muted/50 active:bg-muted/70 transition-colors touch-manipulation ${rowAccent}`}
-                        data-testid={`row-live-incident-${inc.id}`}
-                      >
-                        <div className="flex items-start gap-3">
-                          {inc.categoryColor ? (
-                            <div
-                              className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm"
-                              style={{ backgroundColor: inc.categoryColor }}
-                              aria-hidden
-                            >
-                              <Radio className="h-4 w-4 text-white" strokeWidth={2.25} />
-                            </div>
-                          ) : null}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm truncate">
-                                {isMine ? "Your live incident" : `Incident #${inc.id}`}
-                              </span>
-                              {inc.severity && inc.severity !== "none" && (
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${severityBadgeClass(inc.severity)}`}
-                                  data-testid={`badge-severity-live-${inc.id}`}
-                                >
-                                  <span className={`h-1.5 w-1.5 rounded-full ${severityDotClass(inc.severity)} ${inc.severity === "red" ? "animate-pulse" : ""}`} />
-                                  {inc.severity}
-                                </span>
-                              )}
-                              {inc.categoryName && (
-                                <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-muted text-foreground">
-                                  {inc.categoryName}
-                                </span>
-                              )}
-                              {inc.isEscalated && (
-                                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/25">
-                                  ESCALATED
-                                </span>
-                              )}
-                            </div>
-                            {starterName && !isMine ? (
-                              <p className="text-xs text-foreground/80 mt-0.5">
-                                Started by {starterName}
-                              </p>
-                            ) : null}
-                            <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
-                              <Navigation className="h-3 w-3 shrink-0" />
-                              {locText}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {minsAgo != null ? `Started ${minsAgo === 0 ? "just now" : `${minsAgo} min ago`}` : "In progress"}
-                            </p>
-                          </div>
-                          <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
+                {visibleLiveIncidents.map((inc) => (
+                  <LiveIncidentDashboardRow
+                    key={inc.id}
+                    inc={inc}
+                    locations={locations}
+                    currentUserId={currentUser?.id}
+                    userPos={userPos}
+                    gpsUnavailable={gpsUnavailable}
+                    isDispatch={isDispatch}
+                    onOpen={() => openLiveIncidentRow(inc)}
+                  />
+                ))}
               </ul>
             </CardContent>
           </Card>
