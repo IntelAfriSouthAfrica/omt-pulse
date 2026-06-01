@@ -133,6 +133,28 @@ function isYellowishHex(hex: string): boolean {
   return r > 170 && g > 130 && b < 140;
 }
 
+/** Darken bright category yellows on the map dot so the pulse ring stays visible. */
+function mapMarkerDotColor(color: string): string {
+  if (isYellowishHex(color)) return "#b45309";
+  return color;
+}
+
+/** Name pills use a consistent dark background — category colour is a left accent only. */
+function markerNamePillSvg(
+  pillX: number,
+  pillY: number,
+  pillWidth: number,
+  textX: number,
+  textY: number,
+  labelText: string,
+  accentColor: string,
+): string {
+  const accent = accentColor.replace(/[<>&"]/g, "");
+  return `<rect x="${pillX}" y="${pillY}" width="${pillWidth}" height="14" rx="7" fill="#1e293b" stroke="#ffffff" stroke-width="1"/>
+     <rect x="${pillX + 2}" y="${pillY + 3}" width="3" height="8" rx="1.5" fill="${accent}"/>
+     <text x="${textX}" y="${textY}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#f8fafc">${labelText}</text>`;
+}
+
 function getSeverityRingColor(severity: string | null, categoryColor?: string | null): string | null {
   if (severity === "red") return "#ef4444";
   if (severity === "orange") return "#f97316";
@@ -183,6 +205,7 @@ function makeMarkerIcon(
   label?: string | null,
   categoryColor?: string | null,
 ): google.maps.Icon {
+  const dotColor = mapMarkerDotColor(color);
   const dur = escalated ? "0.7s" : "1.4s";
   const ringColor = getSeverityRingColor(severity ?? null, categoryColor);
   const dotSize = ringColor ? 48 : 40;
@@ -196,24 +219,22 @@ function makeMarkerIcon(
     ? `<circle cx="${cx}" cy="${cx}" r="16" fill="none" stroke="${ringColor}" stroke-width="3" stroke-dasharray="4 2" opacity="0.9"/>`
     : "";
 
-  // Name pill — same style as joiner markers so the map is consistent
   const labelText = label ? label.replace(/[<>&]/g, "") : null;
   const pillWidth = labelText ? Math.max(44, labelText.length * 7 + 14) : 0;
   const svgW = labelText ? Math.max(dotSize, pillWidth + 4) : dotSize;
   const svgH = labelText ? dotSize + 16 : dotSize;
   const pillX = labelText ? (svgW - pillWidth) / 2 : 0;
   const namePill = labelText
-    ? `<rect x="${pillX}" y="${dotSize}" width="${pillWidth}" height="14" rx="7" fill="${color}" stroke="#ffffff" stroke-width="1"/>
-       <text x="${svgW / 2}" y="${dotSize + 10}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#ffffff">${labelText}</text>`
+    ? markerNamePillSvg(pillX, dotSize, pillWidth, svgW / 2, dotSize + 10, labelText, dotColor)
     : "";
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
     ${severityRing}
-    <circle cx="${cx}" cy="${cx}" r="10" fill="${color}" opacity="${pulseOpacity}">
+    <circle cx="${cx}" cy="${cx}" r="10" fill="${dotColor}" opacity="${pulseOpacity}">
       <animate attributeName="r" values="10;20;10" dur="${dur}" repeatCount="indefinite"/>
       <animate attributeName="opacity" values="${pulseOpacity};0;${pulseOpacity}" dur="${dur}" repeatCount="indefinite"/>
     </circle>
-    <circle cx="${cx}" cy="${cx}" r="10" fill="${color}" stroke="white" stroke-width="2.5"/>
+    <circle cx="${cx}" cy="${cx}" r="10" fill="${dotColor}" stroke="white" stroke-width="2.5"/>
     ${warning}
     ${namePill}
   </svg>`;
