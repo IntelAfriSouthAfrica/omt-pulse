@@ -7,17 +7,10 @@ import type { Incident, Category, Location, FormField, CustomMap } from "@shared
 
 type IncidentWithCount = Incident & { attachmentCount: number };
 import { IncidentDialog, AttachmentsDialog } from "@/components/incident-dialog";
+import { OccurrenceBookDesktopTable } from "@/components/occurrence-book-desktop-table";
 import { IncidentLogMobileList } from "@/components/incident-log-mobile";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,11 +21,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Pencil, Trash2, BookOpen, Eye, Paperclip, Map as MapIcon, X, CalendarRange, Download, ArrowLeft, Radio, Siren } from "lucide-react";
+import { Plus, BookOpen, Paperclip, Map as MapIcon, X, CalendarRange, Download, ArrowLeft, Radio, Siren } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PanicBanner, type PanicAlert } from "@/components/panic-banner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -257,7 +249,6 @@ export default function OccurrenceBook() {
     setLocation(remaining ? `/occurrence-book?${remaining}` : "/occurrence-book");
   }, [deepLinkIncidentId, isLoading, incidents, search, setLocation]);
   const canEdit = isAdmin || (currentUser?.canEditIncidents ?? true);
-  const canManageAtts = isAdmin || (currentUser?.canManageAttachments ?? true);
   const canDelete = !isReporter && (isAdmin || (currentUser?.canDeleteIncidents ?? true));
 
   const deleteMutation = useMutation({
@@ -320,6 +311,16 @@ export default function OccurrenceBook() {
       return true;
     });
   }, [incidents, selectedMapId, dateFrom, dateTo, importBatchIdFilter, severityFilter, isReporter, currentUser?.id]);
+
+  /** Desktop: only show custom-field columns when at least one visible row has data. */
+  const tableCustomFields = useMemo(() => {
+    return visibleCustomFields.filter((cf) =>
+      filteredIncidents.some((inc) => {
+        const val = (inc.customFields as Record<string, string | number | null> | null)?.[cf.fieldKey];
+        return val != null && String(val).trim() !== "";
+      }),
+    );
+  }, [visibleCustomFields, filteredIncidents]);
 
   const hasDateFilter = dateFrom !== "" || dateTo !== "";
   const clearDateFilter = () => { setDateFrom(""); setDateTo(""); };
@@ -427,24 +428,29 @@ export default function OccurrenceBook() {
   }, [incidents]);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-1 px-3 py-2 border-b shrink-0">
+    <div className="flex flex-col h-full bg-muted/20 md:bg-background">
+      <div className="flex items-center gap-2 px-4 md:px-6 py-3 border-b shrink-0 bg-card">
         <SidebarTrigger />
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLocation("/dashboard")} data-testid="button-back">
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setLocation("/dashboard")} data-testid="button-back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <span className="text-sm font-semibold flex-1 truncate px-1" data-testid="text-page-title">
-          {isReporter
-            ? periodParam === "week" ? "My Incidents — This Week" : periodParam === "day" ? "My Incidents — Today" : "My Incidents"
-            : periodParam === "week" ? "Occurrence Book — This Week" : periodParam === "day" ? "Occurrence Book — Today" : "Occurrence Book"}
-        </span>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base md:text-lg font-semibold truncate" data-testid="text-page-title">
+            {isReporter
+              ? periodParam === "week" ? "My Incidents — This Week" : periodParam === "day" ? "My Incidents — Today" : "My Incidents"
+              : periodParam === "week" ? "Occurrence Book — This Week" : periodParam === "day" ? "Occurrence Book — Today" : "Occurrence Book"}
+          </h1>
+          <p className="hidden md:block text-xs text-muted-foreground">
+            {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? "s" : ""} in view
+          </p>
+        </div>
         {!isReporter && (
-          <Button size="sm" onClick={() => { setEditingIncident(null); setDialogOpen(true); }} data-testid="button-new-incident">
-            <Plus className="h-4 w-4 mr-1" /> Report
+          <Button size="sm" className="shrink-0" onClick={() => { setEditingIncident(null); setDialogOpen(true); }} data-testid="button-new-incident">
+            <Plus className="h-4 w-4 mr-1.5" /> Report incident
           </Button>
         )}
       </div>
-      <div className="p-4 space-y-4 overflow-y-auto flex-1">
+      <div className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1">
 
         {(isAdmin || isSupervisor) && (
           <PanicBanner
@@ -476,14 +482,19 @@ export default function OccurrenceBook() {
           </div>
         )}
 
-        <Card className="overflow-hidden border-0 shadow-none md:border md:shadow-sm">
-          <CardHeader className="pb-3 px-4 pt-4 md:px-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="hidden sm:flex items-center gap-2 text-base">
-                <BookOpen className="h-4 w-4" />
-                Incident Log
-              </CardTitle>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <Card className="overflow-hidden border shadow-sm">
+          <CardHeader className="border-b bg-muted/30 px-4 py-4 md:px-6 space-y-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="hidden md:block">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <BookOpen className="h-5 w-5 text-primary" />
+                  Incident Log
+                </CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Click a row to open full details. Use filters to narrow the log.
+                </p>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end lg:w-auto">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <CalendarRange className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                   <Input
@@ -584,7 +595,7 @@ export default function OccurrenceBook() {
               </div>
             </div>
             {(selectedMapId !== null || hasDateFilter || importBatchIdFilter !== null || severityFilter !== "any") && (
-              <div className="flex items-center gap-2 mt-2 flex-wrap" data-testid="active-filters-row">
+              <div className="flex items-center gap-2 flex-wrap" data-testid="active-filters-row">
                 {importBatchIdFilter !== null && (
                   <Badge variant="secondary" className="flex items-center gap-1 text-xs pl-2 pr-1 py-1" data-testid="chip-import-batch-filter">
                     <BookOpen className="h-3 w-3" />
@@ -716,196 +727,26 @@ export default function OccurrenceBook() {
                   showDateTime={showDateTime}
                   onSelect={setViewingIncident}
                 />
-                <div className="hidden overflow-x-auto md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-center">Incident #</TableHead>
-                      {showDateTime && <TableHead className="text-center">Date & Time</TableHead>}
-                      {showCategory && <TableHead className="text-center">Type</TableHead>}
-                      {showLocation && <TableHead className="text-center">Location</TableHead>}
-                      {visibleCustomFields.map((cf) => (
-                        <TableHead key={cf.fieldKey} className="text-center">{cf.label}</TableHead>
-                      ))}
-                      <TableHead className="text-center">Severity</TableHead>
-                      <TableHead className="text-center">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredIncidents.map((incident) => {
-                      const customData = (incident.customFields as Record<string, string | number | null>) || {};
-                      return (
-                        <TableRow key={incident.id} data-testid={`row-incident-${incident.id}`}>
-                          <TableCell className="text-sm font-medium text-center whitespace-nowrap" data-testid={`text-incident-number-${incident.id}`}>
-                            {incidentNumberMap.get(incident.id) ?? incident.id}
-                          </TableCell>
-                          {showDateTime && (
-                            <TableCell className="text-center">
-                              <div>
-                                <p className="text-sm font-medium">{incident.incidentDate}</p>
-                                <p className="text-xs text-muted-foreground">{incident.incidentTime}</p>
-                              </div>
-                            </TableCell>
-                          )}
-                          {showCategory && (
-                            <TableCell className="text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="text-sm">{getCategoryName(incident)}</span>
-                                {incident.isLive && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide" data-testid={`badge-live-${incident.id}`}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                                    LIVE
-                                  </span>
-                                )}
-                                {!incident.isLive && (incident as any).panicClosedAt && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide" data-testid={`badge-panic-${incident.id}`}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                    PANIC
-                                  </span>
-                                )}
-                              </div>
-                            </TableCell>
-                          )}
-                          {showLocation && (() => {
-                            const locDisplay = getLocationDisplay(incident);
-                            const mapsUrl = getGoogleMapsUrl(incident) ||
-                              (locDisplay.type === "text" && /^-?\d+\.\d+, -?\d+\.\d+$/.test(locDisplay.label?.trim() ?? "")
-                                ? `https://www.google.com/maps?q=${locDisplay.label!.trim()}`
-                                : null);
-                            return (
-                              <TableCell className="text-sm max-w-[160px] text-center" data-testid={`text-location-${incident.id}`}>
-                                {locDisplay.type === "customMap" ? (
-                                  <span className="flex items-center justify-center gap-1 truncate">
-                                    <MapIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                                    <span className="truncate">{locDisplay.label} — pin placed</span>
-                                  </span>
-                                ) : mapsUrl ? (
-                                  <a
-                                    href={mapsUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="truncate block text-primary hover:underline"
-                                    data-testid={`link-location-${incident.id}`}
-                                  >
-                                    {locDisplay.label}
-                                  </a>
-                                ) : (
-                                  <span className="truncate block">{locDisplay.label}</span>
-                                )}
-                              </TableCell>
-                            );
-                          })()}
-                          {visibleCustomFields.map((cf) => {
-                            const val = customData[cf.fieldKey]?.toString() || "";
-                            return (
-                              <TableCell key={cf.fieldKey} className="text-sm text-center">
-                                {val ? (
-                                  cf.fieldType === "file" ? (
-                                    <a href={val} target="_blank" rel="noopener noreferrer" data-testid={`btn-file-custom-${cf.fieldKey}`}>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7" type="button" tabIndex={-1}>
-                                        <Paperclip className="h-4 w-4 text-muted-foreground" />
-                                      </Button>
-                                    </a>
-                                  ) : (
-                                    <Popover>
-                                      <PopoverTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" data-testid={`btn-view-custom-${cf.fieldKey}`}>
-                                          <Eye className="h-4 w-4 text-muted-foreground" />
-                                        </Button>
-                                      </PopoverTrigger>
-                                      <PopoverContent className="max-w-sm whitespace-pre-wrap text-sm" data-testid={`popover-custom-${cf.fieldKey}`}>
-                                        {val}
-                                      </PopoverContent>
-                                    </Popover>
-                                  )
-                                ) : (
-                                  "-"
-                                )}
-                              </TableCell>
-                            );
-                          })}
-                          <TableCell className="text-center" data-testid={`cell-severity-${incident.id}`}>
-                            {incident.severity ? (
-                              <span
-                                className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold border ${
-                                  incident.severity === "red"
-                                    ? "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30"
-                                    : incident.severity === "orange"
-                                    ? "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30"
-                                    : "bg-yellow-400/15 text-yellow-700 dark:text-yellow-400 border-yellow-400/30"
-                                }`}
-                                data-testid={`badge-severity-${incident.id}`}
-                              >
-                                <span
-                                  className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                                    incident.severity === "red"
-                                      ? "bg-red-500"
-                                      : incident.severity === "orange"
-                                      ? "bg-orange-500"
-                                      : "bg-yellow-400"
-                                  }`}
-                                />
-                                {incident.severity.charAt(0).toUpperCase() + incident.severity.slice(1)}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-xs">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => setViewingIncident(incident)}
-                                data-testid={`button-view-${incident.id}`}
-                                title="View"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-                              {canEdit && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => {
-                                  setEditingIncident(incident);
-                                  setDialogOpen(true);
-                                }}
-                                data-testid={`button-edit-${incident.id}`}
-                                title="Edit"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              )}
-                              {canManageAtts && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => setAttachmentsIncidentId(incident.id)}
-                                data-testid={`button-attachments-${incident.id}`}
-                                title="Attachments"
-                              >
-                                <Paperclip className="h-3.5 w-3.5" />
-                              </Button>
-                              )}
-                              {canDelete && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => setDeleteId(incident.id)}
-                                data-testid={`button-delete-${incident.id}`}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-                </div>
+                <OccurrenceBookDesktopTable
+                  incidents={filteredIncidents}
+                  incidentNumberMap={incidentNumberMap}
+                  showDateTime={showDateTime}
+                  showCategory={showCategory}
+                  showLocation={showLocation}
+                  tableCustomFields={tableCustomFields}
+                  getCategoryName={getCategoryName}
+                  getLocationDisplay={getLocationDisplay}
+                  getGoogleMapsUrl={getGoogleMapsUrl}
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  onView={setViewingIncident}
+                  onEdit={(incident) => {
+                    setEditingIncident(incident);
+                    setDialogOpen(true);
+                  }}
+                  onAttachments={setAttachmentsIncidentId}
+                  onDelete={setDeleteId}
+                />
               </>
             )}
           </CardContent>
@@ -927,7 +768,7 @@ export default function OccurrenceBook() {
       )}
 
       <Sheet open={viewingIncident !== null} onOpenChange={(open) => { if (!open) setViewingIncident(null); }}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-md md:max-w-lg lg:max-w-xl overflow-y-auto">
           {viewingIncident && (() => {
             const inc = viewingIncident;
             const cat = categories.find((c) => c.id === inc.categoryId);
