@@ -75,10 +75,11 @@ function ActionTile({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`w-full flex items-center gap-4 px-4 py-4 min-h-[72px] rounded-2xl active:scale-[0.98] transition-transform touch-manipulation text-left ${surface}`}
+      className={`w-full flex items-center gap-4 px-4 h-[88px] rounded-2xl active:scale-[0.98] transition-transform touch-manipulation text-left ${surface}`}
     >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20">
-        <Icon className="h-6 w-6" strokeWidth={2.25} />
+      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20">
+        <span className="pointer-events-none absolute inset-0 rounded-xl border-2 border-white/50 action-tile-ring" aria-hidden />
+        <Icon className="relative h-6 w-6 action-tile-icon-pulse" strokeWidth={2.25} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-bold text-base leading-tight">{title}</p>

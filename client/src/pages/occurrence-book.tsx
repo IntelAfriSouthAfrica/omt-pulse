@@ -7,6 +7,7 @@ import type { Incident, Category, Location, FormField, CustomMap } from "@shared
 
 type IncidentWithCount = Incident & { attachmentCount: number };
 import { IncidentDialog, AttachmentsDialog } from "@/components/incident-dialog";
+import { IncidentLogMobileList } from "@/components/incident-log-mobile";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -475,15 +476,15 @@ export default function OccurrenceBook() {
           </div>
         )}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <CardTitle className="flex items-center gap-2 text-base">
+        <Card className="overflow-hidden border-0 shadow-none md:border md:shadow-sm">
+          <CardHeader className="pb-3 px-4 pt-4 md:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle className="hidden sm:flex items-center gap-2 text-base">
                 <BookOpen className="h-4 w-4" />
                 Incident Log
               </CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <CalendarRange className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                   <Input
                     type="date"
@@ -538,6 +539,7 @@ export default function OccurrenceBook() {
                     </Select>
                   </div>
                 )}
+                <div className="flex flex-wrap items-center gap-2">
                 <Select
                   value={severityFilter}
                   onValueChange={setSeverityFilter}
@@ -578,6 +580,7 @@ export default function OccurrenceBook() {
                 >
                   <Download className="h-3.5 w-3.5" />
                 </Button>
+                </div>
               </div>
             </div>
             {(selectedMapId !== null || hasDateFilter || importBatchIdFilter !== null || severityFilter !== "any") && (
@@ -650,11 +653,18 @@ export default function OccurrenceBook() {
           </CardHeader>
           <CardContent className="p-0">
             {isLoading ? (
-              <div className="p-6 space-y-3">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
+              <>
+                <div className="space-y-3 p-4 md:hidden">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                  ))}
+                </div>
+                <div className="hidden space-y-3 p-6 md:block">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              </>
             ) : filteredIncidents.length === 0 ? (
               <div className="p-12 text-center">
                 <BookOpen className="mx-auto h-12 w-12 text-muted-foreground/30" />
@@ -694,7 +704,19 @@ export default function OccurrenceBook() {
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+                <IncidentLogMobileList
+                  incidents={filteredIncidents}
+                  incidentNumberMap={incidentNumberMap}
+                  categories={categories}
+                  getCategoryName={getCategoryName}
+                  getLocationDisplay={getLocationDisplay}
+                  showCategory={showCategory}
+                  showLocation={showLocation}
+                  showDateTime={showDateTime}
+                  onSelect={setViewingIncident}
+                />
+                <div className="hidden overflow-x-auto md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -883,7 +905,8 @@ export default function OccurrenceBook() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

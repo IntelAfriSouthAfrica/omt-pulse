@@ -6,7 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Lock, Eye, EyeOff, Mail, ArrowLeft } from "lucide-react";
 import { HeartbeatLine } from "@/components/heartbeat-line";
-import omtLogo from "@/assets/omt-logo-v2.png";
+import { OmtShield } from "@/components/omt-shield";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -74,7 +74,7 @@ export default function LoginPage() {
           {/* Left — branding */}
           <div className="flex-1 space-y-5 text-center md:text-left">
             <div className="flex flex-col items-center gap-4 md:flex-row md:items-start">
-              <img src={omtLogo} alt="OMT Pulse" className="h-16 w-16 shrink-0 object-contain" />
+              <OmtShield className="h-16 w-16 shrink-0" />
               <div>
                 <h1 className="text-3xl font-bold tracking-tight sm:text-4xl" data-testid="text-login-title">
                   OMT Pulse
