@@ -8,6 +8,7 @@ import type { Incident, Category, Location, FormField, CustomMap } from "@shared
 type IncidentWithCount = Incident & { attachmentCount: number };
 import { IncidentDialog, AttachmentsDialog } from "@/components/incident-dialog";
 import { OccurrenceBookDesktopTable } from "@/components/occurrence-book-desktop-table";
+import { IncidentEvidenceSection } from "@/components/incident-evidence-section";
 import { IncidentLogMobileList } from "@/components/incident-log-mobile";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -764,6 +765,8 @@ export default function OccurrenceBook() {
           open={true}
           onOpenChange={(open) => { if (!open) setAttachmentsIncidentId(null); }}
           incidentId={attachmentsIncidentId}
+          canAdd
+          canDelete={isAdmin}
         />
       )}
 
@@ -998,23 +1001,12 @@ export default function OccurrenceBook() {
 
                   <div className="pt-3 border-t border-border/40">
                     <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Attachments</p>
-                    {inc.attachmentCount > 0 ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => {
-                          setViewingIncident(null);
-                          setAttachmentsIncidentId(inc.id);
-                        }}
-                        data-testid={`button-view-attachments-${inc.id}`}
-                      >
-                        <Paperclip className="h-3.5 w-3.5" />
-                        View {inc.attachmentCount} attachment{inc.attachmentCount !== 1 ? "s" : ""}
-                      </Button>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No attachments</p>
-                    )}
+                    <IncidentEvidenceSection
+                      incidentId={inc.id}
+                      canAdd
+                      canDelete={isAdmin}
+                      compact
+                    />
                   </div>
                 </div>
               </>
