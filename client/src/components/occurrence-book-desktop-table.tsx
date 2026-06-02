@@ -38,6 +38,27 @@ type Props = {
   onLocationClick: (incident: IncidentWithMeta) => void;
 };
 
+function EvidenceBadge({ hasEvidence, incidentId }: { hasEvidence: boolean; incidentId: number }) {
+  if (hasEvidence) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full border border-green-500/30 bg-green-500/15 px-2.5 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400"
+        data-testid={`badge-evidence-${incidentId}`}
+      >
+        Yes
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400"
+      data-testid={`badge-evidence-${incidentId}`}
+    >
+      No
+    </span>
+  );
+}
+
 function SeverityBadge({ severity, incidentId }: { severity: string; incidentId: number }) {
   const tone =
     severity === "red"
@@ -86,21 +107,21 @@ export function OccurrenceBookDesktopTable({
       className="hidden md:block max-h-[calc(100dvh-16rem)] overflow-auto rounded-b-lg border-t"
       data-testid="occurrence-book-desktop-table"
     >
-      <Table className="table-fixed min-w-[1100px]">
+      <Table className="table-fixed min-w-[1180px]">
         <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_hsl(var(--border))]">
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-[128px] pl-6 text-xs uppercase tracking-wide">Incident #</TableHead>
             {showDateTime && <TableHead className="w-[118px] text-xs uppercase tracking-wide">Date & Time</TableHead>}
             {showCategory && <TableHead className="w-[160px] text-xs uppercase tracking-wide">Type</TableHead>}
             {showLocation && <TableHead className="text-xs uppercase tracking-wide">Location</TableHead>}
-            <TableHead className="w-[120px] text-xs uppercase tracking-wide">Reporter</TableHead>
+            <TableHead className="w-[168px] text-xs uppercase tracking-wide">Reporter</TableHead>
             {tableCustomFields.map((cf) => (
               <TableHead key={cf.fieldKey} className="w-[120px] text-xs uppercase tracking-wide truncate">
                 {cf.label}
               </TableHead>
             ))}
             <TableHead className="w-[108px] text-xs uppercase tracking-wide">Severity</TableHead>
-            <TableHead className="w-[88px] text-xs uppercase tracking-wide">Evidence</TableHead>
+            <TableHead className="w-[100px] text-xs uppercase tracking-wide">Evidence</TableHead>
             <TableHead className="w-[152px] pr-6 text-xs uppercase tracking-wide text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -192,7 +213,7 @@ export function OccurrenceBookDesktopTable({
                 })()}
                 <TableCell className="py-3 text-sm" data-testid={`text-reporter-${incident.id}`}>
                   {reporter ? (
-                    <span className="truncate block">{reporter}</span>
+                    <span className="block whitespace-nowrap" title={reporter}>{reporter}</span>
                   ) : (
                     <span className="text-muted-foreground/50">—</span>
                   )}
@@ -225,10 +246,8 @@ export function OccurrenceBookDesktopTable({
                     <span className="text-muted-foreground text-xs">—</span>
                   )}
                 </TableCell>
-                <TableCell className="py-3 text-sm" data-testid={`cell-evidence-${incident.id}`}>
-                  <span className={hasEvidence ? "text-foreground font-medium" : "text-muted-foreground/50"}>
-                    {hasEvidence ? "Yes" : "No"}
-                  </span>
+                <TableCell className="py-3" data-testid={`cell-evidence-${incident.id}`}>
+                  <EvidenceBadge hasEvidence={hasEvidence} incidentId={incident.id} />
                 </TableCell>
                 <TableCell className="py-3 pr-6">
                   <div className="flex items-center justify-end gap-0.5" onClick={stopRowClick}>

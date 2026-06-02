@@ -16,14 +16,18 @@ type Props = {
   locations: Location[];
 };
 
+const MAP_HEIGHT = "min(58vh, 420px)";
+
 function GeoMapPreview({
   lat,
   lng,
   label,
+  open,
 }: {
   lat: number;
   lng: number;
   label: string;
+  open: boolean;
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -49,17 +53,33 @@ function GeoMapPreview({
     const map = new google.maps.Map(mapRef.current, {
       center: { lat, lng },
       zoom: 15,
-      mapTypeControl: false,
+      mapTypeControl: true,
       streetViewControl: false,
-      fullscreenControl: false,
+      fullscreenControl: true,
     });
     new google.maps.Marker({ position: { lat, lng }, map, title: label });
     mapInstanceRef.current = map;
   }, [ready, lat, lng, label]);
 
+  // Re-fit after the sheet animation so the map fills the larger panel.
+  useEffect(() => {
+    if (!open || !ready || !mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+    const timer = window.setTimeout(() => {
+      google.maps.event.trigger(map, "resize");
+      map.setCenter({ lat, lng });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [open, ready, lat, lng]);
+
+  const shellStyle = { height: MAP_HEIGHT };
+
   if (error) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-md border bg-muted/30 text-sm text-muted-foreground">
+      <div
+        className="flex items-center justify-center rounded-lg border bg-muted/30 text-sm text-muted-foreground px-4 text-center"
+        style={shellStyle}
+      >
         Map unavailable — {lat.toFixed(5)}, {lng.toFixed(5)}
       </div>
     );
@@ -67,13 +87,23 @@ function GeoMapPreview({
 
   if (!ready) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-md border bg-muted/30">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div
+        className="flex items-center justify-center rounded-lg border bg-muted/30"
+        style={shellStyle}
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  return <div ref={mapRef} className="h-48 w-full rounded-md border" data-testid="incident-location-geo-map" />;
+  return (
+    <div
+      ref={mapRef}
+      className="w-full rounded-lg border shadow-sm"
+      style={shellStyle}
+      data-testid="incident-location-geo-map"
+    />
+  );
 }
 
 export function IncidentLocationSheet({
@@ -95,7 +125,7 @@ export function IncidentLocationSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
         <SheetHeader className="mb-4">
           <SheetTitle className="flex items-center gap-2 text-base">
             <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -108,10 +138,10 @@ export function IncidentLocationSheet({
             customMap={customMap}
             incidents={[incident]}
             categories={categories}
-            height="280px"
+            height={MAP_HEIGHT}
           />
         ) : coords ? (
-          <GeoMapPreview lat={coords.lat} lng={coords.lng} label={locationLabel} />
+          <GeoMapPreview lat={coords.lat} lng={coords.lng} label={locationLabel} open={open} />
         ) : (
           <p className="text-sm text-muted-foreground">
             No map coordinates recorded for this location.

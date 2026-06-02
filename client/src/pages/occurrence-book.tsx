@@ -884,7 +884,13 @@ export default function OccurrenceBook() {
 
                   <div>
                     <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Evidence</p>
-                    <p className="text-sm mt-0.5">{hasEvidence ? "Yes" : "No"}</p>
+                    <div className="mt-0.5">
+                      {hasEvidence ? (
+                        <span className="inline-flex items-center rounded-full border border-green-500/30 bg-green-500/15 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">Yes</span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-red-500/30 bg-red-500/15 px-2 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400">No</span>
+                      )}
+                    </div>
                   </div>
 
                   {inc.description && (
