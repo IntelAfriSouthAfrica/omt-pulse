@@ -1,4 +1,4 @@
-const CACHE_NAME = "omt-v87";
+const CACHE_NAME = "omt-v88";
 
 // When the page asks us to nuke everything (after a new deploy), wipe all
 // caches and tell every controlled tab to reload. The page also unregisters
@@ -86,15 +86,18 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith(
       caches.open(CACHE_NAME).then(async (cache) => {
+        // Network-first for HTML shell so deploys pick up new hashed JS bundles.
+        try {
+          const networkResponse = await fetch("/");
+          if (networkResponse.ok) {
+            await cache.put("/", networkResponse.clone());
+            return networkResponse;
+          }
+        } catch {
+          // offline — fall back to cached shell below
+        }
         const shell = await cache.match("/");
-        // Refresh the shell in the background regardless.
-        const networkFetch = fetch("/").then((r) => {
-          if (r.ok) cache.put("/", r.clone());
-          return r;
-        }).catch(() => Response.error());
-        // Return cached shell immediately if we have one; otherwise wait for network.
-        // If both fail, Response.error() signals a network error rather than returning null.
-        return shell || networkFetch;
+        return shell || Response.error();
       })
     );
     return;
