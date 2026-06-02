@@ -167,10 +167,7 @@ export default function LoginPage() {
                 </form>
               </Form>
               <p className="mt-4 text-center text-sm text-muted-foreground">
-                Don&apos;t have an account?{" "}
-                <Link href="/register" className="font-medium text-primary hover:underline" data-testid="link-register">
-                  Register here
-                </Link>
+                Access is by invitation only. Contact your organisation administrator if you need an account.
               </p>
               <p className="mt-3 text-center text-xs text-muted-foreground">
                 <Link href="/privacy" className="hover:text-foreground hover:underline" data-testid="link-privacy-login">

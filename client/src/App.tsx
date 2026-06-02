@@ -26,7 +26,6 @@ import UserAdminPage from "@/pages/user-admin";
 import ImportPage from "@/pages/import";
 import BillingPage from "@/pages/billing";
 import LoginPage from "@/pages/login";
-import RegisterPage from "@/pages/register";
 import LiveIncidentPage from "@/pages/live-incident";
 import LiveSeverityPage from "@/pages/live-severity";
 import LiveMonitorPage from "@/pages/live-monitor";
@@ -976,7 +975,7 @@ function UnauthenticatedApp() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
-      <Route path="/register" component={RegisterPage} />
+      <Route path="/register" component={RedirectToLogin} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route component={RedirectToLogin} />
     </Switch>
@@ -984,8 +983,6 @@ function UnauthenticatedApp() {
 }
 
 // Marketing landing page wrapper — public, no auth, no PWA install gate.
-// First-time visitors to omtpulse.com/ see this; "Sign in / Install app"
-// links into /login which is wrapped by PwaInstallGate as before.
 function PublicLanding() {
   return <LandingPage />;
 }
@@ -1052,11 +1049,8 @@ function AppRouter() {
   return <AppContent />;
 }
 
-// Public marketing landing page lives at "/" for unauthenticated visitors,
-// OUTSIDE the PwaInstallGate so first-time visitors can read about the
-// product before being asked to install. The install gate still wraps every
-// other route (login, register, the app itself). Authenticated users hitting
-// "/" continue to land in the app proper (AppContent decides that).
+// Public marketing landing at "/" for unauthenticated visitors.
+// PWA install gate applies only after sign-in or invite onboarding (authenticated).
 function RootRouter() {
   const [location] = useLocation();
   const { data: user, isLoading } = useQuery<AuthUser>({
@@ -1079,10 +1073,12 @@ function RootRouter() {
     return <PrivacyPage />;
   }
 
+  // Login and register are public — no install gate (invite-only distribution).
+  if (location === "/login" || location.startsWith("/register")) {
+    return <AppRouter />;
+  }
+
   // Visitor at "/" with no session → marketing landing page, no install gate.
-  // We render the landing while auth/me is still loading too, so the login
-  // page never flashes for first-time visitors. If the user is in fact logged
-  // in, the next render swaps in the authenticated app.
   if (location === "/" && !user) {
     if (isLoading) {
       return (
@@ -1094,12 +1090,16 @@ function RootRouter() {
     return <PublicLanding />;
   }
 
-  // Everything else goes through the install gate as before.
-  return (
-    <PwaInstallGate>
-      <AppRouter />
-    </PwaInstallGate>
-  );
+  // Authenticated sessions (incl. post-invite onboarding): optional PWA install prompt.
+  if (user) {
+    return (
+      <PwaInstallGate>
+        <AppRouter />
+      </PwaInstallGate>
+    );
+  }
+
+  return <AppRouter />;
 }
 
 // Polls /api/version every 60s. When the server build id changes (i.e. a new

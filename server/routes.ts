@@ -823,6 +823,13 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/register", async (req, res) => {
+    const userCount = await storage.getUserCount();
+    if (userCount > 0) {
+      return res.status(403).json({
+        message: "Registration is by invitation only. Ask your administrator for an invite link.",
+      });
+    }
+
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
       const msg = parsed.error.errors[0]?.message || "Validation failed";
