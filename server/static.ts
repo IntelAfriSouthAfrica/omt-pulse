@@ -48,6 +48,11 @@ export function serveStatic(app: Express) {
     });
   });
 
+  // Public org signup is disabled — send bookmarked /register URLs to login.
+  app.get("/register", (_req, res) => {
+    res.redirect(302, "/login");
+  });
+
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
