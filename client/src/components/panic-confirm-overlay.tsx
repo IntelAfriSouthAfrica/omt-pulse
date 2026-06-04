@@ -8,7 +8,8 @@ import {
   postPanicAlert,
   probePanicLocation,
 } from "@/lib/panic-send";
-import { hasPanicCoordinates, type PanicLocationIssue, type PanicLocationResult } from "@/lib/panic-location";
+import { hasPanicCoordinates, type PanicLocationResult } from "@/lib/panic-location";
+import { OpenLocationSettingsButton } from "@/components/open-location-settings-button";
 
 type Props = {
   open: boolean;
@@ -25,6 +26,13 @@ export function PanicConfirmOverlay({ open, onOpenChange, confirmTestId, notifyH
   const [pendingLoc, setPendingLoc] = useState<PanicLocationResult | null>(null);
   const [showLocationGate, setShowLocationGate] = useState(false);
 
+  async function refreshLocationProbe() {
+    const loc = await probePanicLocation();
+    setLocationProbe(loc);
+    if (showLocationGate) setPendingLoc(loc);
+    return loc;
+  }
+
   useEffect(() => {
     if (!open) {
       setLocationProbe(null);
@@ -36,10 +44,21 @@ export function PanicConfirmOverlay({ open, onOpenChange, confirmTestId, notifyH
     void probePanicLocation().then((loc) => {
       if (!cancelled) setLocationProbe(loc);
     });
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void probePanicLocation().then((loc) => {
+        if (!cancelled) {
+          setLocationProbe(loc);
+          if (showLocationGate) setPendingLoc(loc);
+        }
+      });
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [open]);
+  }, [open, showLocationGate]);
 
   const locationReady = locationProbe != null && hasPanicCoordinates(locationProbe);
 
@@ -87,10 +106,15 @@ export function PanicConfirmOverlay({ open, onOpenChange, confirmTestId, notifyH
             <h2 className="text-xl font-bold text-white">{panicLocationOffTitle(pendingLoc.issue)}</h2>
             <p className="text-sm text-white/80 leading-relaxed">{panicLocationOffBody(pendingLoc.issue)}</p>
             <p className="text-xs text-white/60">
-              Turn on <strong className="text-white">Location</strong> for OMT Pulse in phone settings, then send again if you can.
+              Open settings below, turn on <strong className="text-white">Location</strong> for OMT Pulse, then return here to send with GPS.
             </p>
           </div>
           <div className="w-full space-y-3 pt-2">
+            <OpenLocationSettingsButton
+              variant="dark"
+              testId={`${confirmTestId}-open-location-settings`}
+              onAfterOpen={() => void refreshLocationProbe()}
+            />
             <button
               type="button"
               onClick={() => finishSend(pendingLoc)}
@@ -138,11 +162,18 @@ export function PanicConfirmOverlay({ open, onOpenChange, confirmTestId, notifyH
           </p>
         </div>
         {locationProbe != null && !locationReady && (
-          <div className="w-full flex items-start gap-2 rounded-xl bg-red-500/20 border border-red-500/50 px-4 py-3 text-xs text-red-100 text-left">
-            <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              <strong className="text-white">Location is off or unavailable.</strong> Turn on Location for OMT Pulse before sending so responders can find you.
-            </span>
+          <div className="w-full space-y-3">
+            <div className="flex items-start gap-2 rounded-xl bg-red-500/20 border border-red-500/50 px-4 py-3 text-xs text-red-100 text-left">
+              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                <strong className="text-white">Location is off or unavailable.</strong> Open settings to turn on Location for OMT Pulse before sending.
+              </span>
+            </div>
+            <OpenLocationSettingsButton
+              variant="dark"
+              testId={`${confirmTestId}-open-location-settings-preview`}
+              onAfterOpen={() => void refreshLocationProbe()}
+            />
           </div>
         )}
         {locationReady && (

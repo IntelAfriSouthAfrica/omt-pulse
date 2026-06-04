@@ -12,6 +12,8 @@ dependencies {
     implementation project(':capacitor-community-text-to-speech')
     implementation project(':capacitor-google-maps')
     implementation project(':capacitor-push-notifications')
+    implementation project(':capgo-capacitor-audio-recorder')
+    implementation project(':capacitor-native-settings')
 
 }
 
