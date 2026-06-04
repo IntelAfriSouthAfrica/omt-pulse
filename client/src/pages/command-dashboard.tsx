@@ -8,9 +8,8 @@ import { IncidentDialog } from "@/components/incident-dialog";
 import { OmtShield } from "@/components/omt-shield";
 import { HeartbeatLine } from "@/components/heartbeat-line";
 import { PanicBanner, type PanicAlert } from "@/components/panic-banner";
+import { PanicConfirmOverlay } from "@/components/panic-confirm-overlay";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { acquirePanicLocation, appendPanicLocationNote, hasPanicCoordinates } from "@/lib/panic-location";
 import {
   PlusCircle,
   Radio,
@@ -90,19 +89,31 @@ function estimateDriveMinutes(km: number): number {
   return Math.max(1, Math.round((roadKm / 55) * 60));
 }
 
+function pickLatLng(
+  lat: number | string | null | undefined,
+  lng: number | string | null | undefined,
+): { lat: number; lng: number } | null {
+  if (lat == null || lng == null) return null;
+  const la = Number(lat);
+  const ln = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+  return { lat: la, lng: ln };
+}
+
 function getIncidentTarget(inc: LiveIncidentRow): { lat: number; lng: number } | null {
-  const pick = (lat: number | string | null | undefined, lng: number | string | null | undefined) => {
-    if (lat == null || lng == null) return null;
-    const la = Number(lat);
-    const ln = Number(lng);
-    if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
-    return { lat: la, lng: ln };
-  };
+  const isPanic = (inc.categoryName ?? "").toLowerCase().includes("panic");
+  if (isPanic) {
+    return (
+      pickLatLng(inc.destinationLat, inc.destinationLng) ??
+      pickLatLng(inc.liveStartLat, inc.liveStartLng) ??
+      pickLatLng(inc.latitude, inc.longitude)
+    );
+  }
   return (
-    pick(inc.destinationLat, inc.destinationLng) ??
-    pick(inc.liveStartLat, inc.liveStartLng) ??
-    pick(inc.latitude, inc.longitude) ??
-    pick(inc.responderLat, inc.responderLng)
+    pickLatLng(inc.destinationLat, inc.destinationLng) ??
+    pickLatLng(inc.liveStartLat, inc.liveStartLng) ??
+    pickLatLng(inc.latitude, inc.longitude) ??
+    pickLatLng(inc.responderLat, inc.responderLng)
   );
 }
 
@@ -242,6 +253,8 @@ function LiveIncidentDashboardRow({
       : null;
   const tooFar = distanceKm != null && distanceKm > FAR_JOIN_KM;
   const categoryLabel = inc.categoryName ?? "Live incident";
+  const isPanicRow = (inc.categoryName ?? "").toLowerCase().includes("panic");
+  const panicGpsPending = isPanicRow && !target;
 
   return (
     <li>
@@ -304,7 +317,9 @@ function LiveIncidentDashboardRow({
 
             <p className="text-sm text-muted-foreground truncate mt-1 flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-              <span className="truncate">{locText}</span>
+              <span className="truncate">
+                {panicGpsPending ? "GPS pending — panicker location not shared yet" : locText}
+              </span>
             </p>
 
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -335,9 +350,14 @@ function LiveIncidentDashboardRow({
                 Far from you — joining may not be practical
               </p>
             )}
-            {!isMine && !alreadyJoined && distanceKm != null && !tooFar && (
+            {!isMine && !alreadyJoined && !panicGpsPending && distanceKm != null && !tooFar && (
               <p className="text-[11px] text-green-700 dark:text-green-400 mt-1.5 font-medium">
                 Within reach — tap to join
+              </p>
+            )}
+            {panicGpsPending && !isMine && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5 font-medium">
+                Tap to join — map updates when their GPS is available
               </p>
             )}
           </div>
@@ -445,7 +465,6 @@ export default function CommandDashboard() {
   const [period, setPeriod] = useState<Period>("day");
   const [logIncidentOpen, setLogIncidentOpen] = useState(false);
   const [panicOpen, setPanicOpen] = useState(false);
-  const [panicking, setPanicking] = useState(false);
   const { toast } = useToast();
 
   const DISMISSED_KEY = "dismissedPanicIds";
@@ -484,52 +503,6 @@ export default function CommandDashboard() {
     .filter((c) => c.unreadCount > 0)
     .map((c) => c.recipientId === null ? "General" : `${c.recipientFirstName ?? ""} ${c.recipientLastName ?? ""}`.trim())
     .filter(Boolean);
-
-  async function sendPanic() {
-    setPanicking(true);
-    try {
-      const loc = await acquirePanicLocation();
-      const lat = hasPanicCoordinates(loc) ? loc.lat : undefined;
-      const lng = hasPanicCoordinates(loc) ? loc.lng : undefined;
-      const res = await apiRequest("POST", "/api/panic", { lat, lng });
-      const { sent, found } = await res.json() as { sent: number; found: number };
-      setPanicOpen(false);
-      if (found === 0) {
-        toast({
-          title: "🆘 Panic alert stored",
-          description: appendPanicLocationNote(
-            "No team members have push notifications enabled.",
-            loc,
-          ),
-          variant: "destructive",
-        });
-      } else if (sent === 0) {
-        toast({
-          title: "🆘 Panic alert sent",
-          description: appendPanicLocationNote(
-            "Alert dispatched — delivery may be delayed on some devices.",
-            loc,
-          ),
-        });
-      } else {
-        toast({
-          title: "🆘 Panic alert sent",
-          description: appendPanicLocationNote(
-            `Push notification delivered to ${sent} device${sent === 1 ? "" : "s"}.`,
-            loc,
-          ),
-        });
-      }
-    } catch (e: unknown) {
-      toast({
-        title: "Failed to send panic alert",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setPanicking(false);
-    }
-  }
 
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard", period],
@@ -730,7 +703,6 @@ export default function CommandDashboard() {
         <div className="flex flex-col items-center gap-1.5 py-2">
           <button
             onClick={() => setPanicOpen(true)}
-            disabled={panicking}
             data-testid="button-panic"
             className="h-20 w-20 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 shadow-[0_0_0_4px_rgba(220,38,38,0.3)] hover:shadow-[0_0_0_6px_rgba(220,38,38,0.4)] transition-all duration-150 flex items-center justify-center touch-manipulation"
             aria-label="Send panic alert"
@@ -776,48 +748,11 @@ export default function CommandDashboard() {
 
       <IncidentDialog open={logIncidentOpen} onOpenChange={setLogIncidentOpen} />
 
-      {panicOpen && (
-        <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm px-6" data-testid="overlay-panic-confirm">
-          <div className="w-full max-w-sm flex flex-col items-center gap-6 text-center">
-            <div className="relative flex items-center justify-center">
-              <span className="absolute h-28 w-28 rounded-full bg-red-600/20 animate-ping" />
-              <span className="absolute h-20 w-20 rounded-full bg-red-600/30" />
-              <div className="relative h-24 w-24 rounded-full bg-red-600 flex items-center justify-center shadow-lg">
-                <Siren className="h-12 w-12 text-white" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-white tracking-tight">Send PANIC Alert?</h2>
-              <p className="text-sm text-white/70 leading-relaxed">
-                This will immediately alert <strong className="text-white">everyone</strong> in your organisation. Your GPS location will be shared.
-              </p>
-            </div>
-            {typeof Notification !== "undefined" && Notification.permission !== "granted" && (
-              <div className="w-full flex items-start gap-2 rounded-xl bg-amber-500/15 border border-amber-500/40 px-4 py-3 text-xs text-amber-300 text-left">
-                <Siren className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>Push notifications are not enabled — alerts may be delayed.</span>
-              </div>
-            )}
-            <div className="w-full space-y-3 pt-2">
-              <button
-                onClick={() => { setPanicOpen(false); sendPanic(); }}
-                disabled={panicking}
-                data-testid="button-confirm-panic-dashboard"
-                className="w-full h-14 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-bold text-base tracking-wide shadow-lg transition-all touch-manipulation disabled:opacity-60"
-              >
-                {panicking ? "Sending alert…" : "CONFIRM — Send Alert"}
-              </button>
-              <button
-                onClick={() => setPanicOpen(false)}
-                disabled={panicking}
-                className="w-full h-12 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition-all touch-manipulation"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PanicConfirmOverlay
+        open={panicOpen}
+        onOpenChange={setPanicOpen}
+        confirmTestId="button-confirm-panic-dashboard"
+      />
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { IncidentInvolvementSummary } from "@/components/incident-involvement-se
 import { IncidentLogMobileList } from "@/components/incident-log-mobile";
 import { IncidentLocationSheet } from "@/components/incident-location-sheet";
 import { resolveEffectiveSeverity, incidentHasViewableLocation, liveIncidentDestination, type IncidentWithMeta } from "@/lib/incident-display";
-import { acquirePanicLocation, appendPanicLocationNote, hasPanicCoordinates } from "@/lib/panic-location";
+import { PanicConfirmOverlay } from "@/components/panic-confirm-overlay";
 
 type IncidentWithCount = IncidentWithMeta;
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,6 @@ export default function OccurrenceBook() {
     });
   };
   const [panicOpen, setPanicOpen] = useState(false);
-  const [panicking, setPanicking] = useState(false);
   const search = useSearch();
   const [, setLocation] = useLocation();
   const importBatchIdFilter = useMemo(() => {
@@ -368,52 +367,6 @@ export default function OccurrenceBook() {
 
   const hasDateFilter = dateFrom !== "" || dateTo !== "";
   const clearDateFilter = () => { setDateFrom(""); setDateTo(""); };
-
-  async function sendPanic() {
-    setPanicking(true);
-    try {
-      const loc = await acquirePanicLocation();
-      const lat = hasPanicCoordinates(loc) ? loc.lat : undefined;
-      const lng = hasPanicCoordinates(loc) ? loc.lng : undefined;
-      const res = await apiRequest("POST", "/api/panic", { lat, lng });
-      const { sent, found } = await res.json() as { sent: number; found: number };
-      setPanicOpen(false);
-      if (found === 0) {
-        toast({
-          title: "🆘 Panic alert stored",
-          description: appendPanicLocationNote(
-            "No team members have push notifications enabled — they will not receive a push alert. Ask your team to enable notifications in the app.",
-            loc,
-          ),
-          variant: "destructive",
-        });
-      } else if (sent === 0) {
-        toast({
-          title: "🆘 Panic alert sent",
-          description: appendPanicLocationNote(
-            "Alert dispatched — delivery may be delayed on some devices. In-app alarms are active.",
-            loc,
-          ),
-        });
-      } else {
-        toast({
-          title: "🆘 Panic alert sent",
-          description: appendPanicLocationNote(
-            `Push notification delivered to ${sent} device${sent === 1 ? "" : "s"} in your organisation.`,
-            loc,
-          ),
-        });
-      }
-    } catch (e: unknown) {
-      toast({
-        title: "Failed to send panic alert",
-        description: e instanceof Error ? e.message : "Please try again or contact someone immediately.",
-        variant: "destructive",
-      });
-    } finally {
-      setPanicking(false);
-    }
-  }
 
   const exportToCSV = () => {
     const headers: string[] = ["Incident #"];
@@ -1180,49 +1133,12 @@ export default function OccurrenceBook() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Full-screen panic confirmation overlay — shared by both mobile and desktop trigger buttons */}
-      {panicOpen && (
-        <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm px-6" data-testid="overlay-panic-confirm">
-          <div className="w-full max-w-sm flex flex-col items-center gap-6 text-center">
-            <div className="relative flex items-center justify-center">
-              <span className="absolute h-28 w-28 rounded-full bg-red-600/20 animate-ping" />
-              <span className="absolute h-20 w-20 rounded-full bg-red-600/30" />
-              <div className="relative h-24 w-24 rounded-full bg-red-600 flex items-center justify-center shadow-lg">
-                <Siren className="h-12 w-12 text-white" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-white tracking-tight">Send PANIC Alert?</h2>
-              <p className="text-sm text-white/70 leading-relaxed">
-                This will immediately alert <strong className="text-white">everyone</strong> in your organisation that you need urgent assistance. Your GPS location will be shared.
-              </p>
-            </div>
-            {typeof Notification !== "undefined" && Notification.permission !== "granted" && (
-              <div className="w-full flex items-start gap-2 rounded-xl bg-amber-500/15 border border-amber-500/40 px-4 py-3 text-xs text-amber-300 text-left">
-                <Siren className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>Push notifications are not enabled — team members may not be alerted instantly.</span>
-              </div>
-            )}
-            <div className="w-full space-y-3 pt-2">
-              <button
-                onClick={() => { setPanicOpen(false); sendPanic(); }}
-                disabled={panicking}
-                data-testid="button-confirm-panic"
-                className="w-full h-14 rounded-2xl bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-bold text-base tracking-wide shadow-lg transition-all touch-manipulation disabled:opacity-60"
-              >
-                {panicking ? "Sending alert…" : "CONFIRM — Send Alert"}
-              </button>
-              <button
-                onClick={() => setPanicOpen(false)}
-                disabled={panicking}
-                className="w-full h-12 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition-all touch-manipulation"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PanicConfirmOverlay
+        open={panicOpen}
+        onOpenChange={setPanicOpen}
+        confirmTestId="button-confirm-panic"
+        notifyHint="Push notifications are not enabled — team members may not be alerted instantly."
+      />
 
       <IncidentLocationSheet
         open={locationViewIncident !== null}
