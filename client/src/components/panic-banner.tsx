@@ -83,15 +83,7 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
   const [joiningId, setJoiningId] = useState<number | null>(null);
 
   async function respondLive(alert: PanicAlert) {
-    if (alert.lat == null || alert.lng == null) {
-      toast({ title: "No location", description: "This panic alert has no GPS coordinates to navigate to.", variant: "destructive" });
-      return;
-    }
-    const target = {
-      lat: alert.lat,
-      lng: alert.lng,
-      name: `🆘 ${alert.firstName} ${alert.lastName}`.trim(),
-    };
+    const hasGps = alert.lat != null && alert.lng != null;
     setJoiningId(alert.id);
     try {
       // Join the panicker's existing live incident (the panic itself is live).
@@ -99,9 +91,24 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
       // the panic was just closed, we surface a clear error rather than
       // silently dropping the responder into a new live session.
       await joinPanic.mutateAsync(alert.id);
-      try { localStorage.setItem("omt_panic_target", JSON.stringify(target)); } catch { /* ignore */ }
+      if (hasGps) {
+        const target = {
+          lat: alert.lat!,
+          lng: alert.lng!,
+          name: `🆘 ${alert.firstName} ${alert.lastName}`.trim(),
+        };
+        try { localStorage.setItem("omt_panic_target", JSON.stringify(target)); } catch { /* ignore */ }
+      } else {
+        try { localStorage.removeItem("omt_panic_target"); } catch { /* ignore */ }
+      }
       try { localStorage.setItem("omt_joined_incident_id", String(alert.id)); } catch { /* ignore */ }
       queryClient.invalidateQueries({ queryKey: ["/api/incidents/live"] });
+      if (!hasGps) {
+        toast({
+          title: "Joined panic response",
+          description: "No GPS yet — the map will update when they turn location on.",
+        });
+      }
       navigate("/live-incident");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not join the panic incident";

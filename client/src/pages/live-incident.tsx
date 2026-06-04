@@ -26,8 +26,30 @@ import { Capacitor } from '@capacitor/core';
 import CapacitorMap, { type CapacitorMapHandle } from '@/components/CapacitorMap';
 import type { Incident, Category } from "@shared/schema";
 import { isCloseReclassifyType } from "@/lib/incident-categories";
+import { usePanickerLocationSync } from "@/hooks/use-panicker-location-sync";
 
 const LIVE_INCIDENT_KEY = "omt_live_incident_id";
+
+function incidentHasPanicCoords(inc: {
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  liveStartLat?: number | string | null;
+  liveStartLng?: number | string | null;
+  destinationLat?: number | string | null;
+  destinationLng?: number | string | null;
+}): boolean {
+  const pick = (lat: number | string | null | undefined, lng: number | string | null | undefined) => {
+    if (lat == null || lng == null) return false;
+    const la = Number(lat);
+    const ln = Number(lng);
+    return Number.isFinite(la) && Number.isFinite(ln);
+  };
+  return (
+    pick(inc.destinationLat, inc.destinationLng) ||
+    pick(inc.liveStartLat, inc.liveStartLng) ||
+    pick(inc.latitude, inc.longitude)
+  );
+}
 const JOINED_INCIDENT_KEY = "omt_joined_incident_id";
 const ARRIVAL_QUEUE_KEY = "omt_arrival_queue";
 const NAV_STARTED_KEY = "omt_nav_started";
@@ -2711,6 +2733,13 @@ export default function LiveIncidentPage() {
     refetchIntervalInBackground: true,
   });
 
+  const panickerHasCoords = currentIncident ? incidentHasPanicCoords(currentIncident) : false;
+  usePanickerLocationSync(
+    isPanickerView ? currentIncident?.id ?? null : null,
+    isPanickerView,
+    panickerHasCoords,
+  );
+
   if (isPanickerView && currentIncident) {
     // Acknowledgers from panic_acknowledgers
     const ownPanic = panicAlertsForView.find((p) => p.id === currentIncident.id);
@@ -2752,6 +2781,17 @@ export default function LiveIncidentPage() {
         )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {!panickerHasCoords && (
+            <div
+              className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-3 text-sm text-amber-900 dark:text-amber-200"
+              data-testid="banner-panicker-location-off"
+            >
+              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Location is off.</strong> Turn on Location for OMT Pulse in your phone settings so responders can find you. We will keep trying while this screen is open.
+              </span>
+            </div>
+          )}
           <div className="rounded-lg border-2 border-red-600 bg-red-600/10 p-4 text-center" data-testid="panel-panic-status">
             <AlertTriangle className="h-12 w-12 text-red-600 mx-auto mb-2" />
             <p className="text-lg font-bold text-red-700 dark:text-red-400">
@@ -2763,7 +2803,9 @@ export default function LiveIncidentPage() {
               </p>
             )}
             <p className="text-sm mt-2">
-              Help is on the way. Stay on this screen if you can — your location is being shared.
+              {panickerHasCoords
+                ? "Help is on the way. Stay on this screen if you can — your location is being shared."
+                : "Help is on the way. Turn on Location so your team can see where you are."}
             </p>
           </div>
 
@@ -3137,6 +3179,14 @@ export default function LiveIncidentPage() {
                         <span className="text-muted-foreground">ETA <span className="font-medium text-foreground">{fmtDur(routeInfo.duration)}</span></span>
                       </div>
                     )}
+                  </div>
+                ) : !navMode && isJoinerMode && isPanicIncident ? (
+                  <div
+                    className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2.5 flex items-center gap-2 text-sm text-amber-900 dark:text-amber-200"
+                    data-testid="panel-panic-location-pending"
+                  >
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    Panicker GPS pending — the map updates when they turn location on
                   </div>
                 ) : !navMode ? (
                   <div className="rounded-lg border border-dashed px-3 py-2.5 flex items-center gap-2 text-sm text-muted-foreground">

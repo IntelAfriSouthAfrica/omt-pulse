@@ -337,6 +337,57 @@ async function sendClearBadgePush(orgId: string) {
   );
 }
 
+/** Refresh in-app panic banners without a new notification (same silent push as ack). */
+async function broadcastPanicBannerRefresh(orgId: string, excludeUserId?: string) {
+  try {
+    const orgSubs = await storage.getPushSubscriptionsByOrg(orgId, excludeUserId);
+    if (orgSubs.length === 0) return;
+    const silent = JSON.stringify({ type: "panic_ack_update", silent: true });
+    await Promise.allSettled(
+      dedupeByEndpoint(orgSubs).map(async (sub) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            silent,
+          );
+        } catch (err: unknown) {
+          const code = typeof err === "object" && err !== null && "statusCode" in err
+            ? (err as { statusCode: number }).statusCode : 0;
+          if (code === 410 || code === 404) storage.deletePushSubscription(sub.endpoint);
+        }
+      }),
+    );
+  } catch { /* best-effort */ }
+}
+
+async function syncPanicIncidentCoordinates(
+  orgId: string,
+  incidentId: number,
+  lat: number,
+  lng: number,
+  fullName: string,
+) {
+  const destName = `🆘 ${fullName}`;
+  const desc = `🆘 Panic alert — ${fullName} · GPS: ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+  return storage.updateIncident(
+    incidentId,
+    {
+      latitude: lat,
+      longitude: lng,
+      liveStartLat: lat,
+      liveStartLng: lng,
+      destinationLat: lat,
+      destinationLng: lng,
+      destinationName: destName,
+      description: desc,
+      responderLat: lat,
+      responderLng: lng,
+      responderPositionUpdatedAt: new Date(),
+    },
+    orgId,
+  );
+}
+
 // Haversine distance in metres between two lat/lng points
 function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
@@ -2307,6 +2358,45 @@ export async function registerRoutes(
     })();
   });
 
+  // Panicker updates GPS while panic is active (e.g. location turned on after SOS).
+  app.patch("/api/incidents/:id/panic-location", async (req, res) => {
+    if (!req.currentUser) return res.status(401).json({ message: "Unauthorized" });
+    const { organizationId: orgId, id: userId } = req.currentUser;
+    const incidentId = parseInt(req.params.id as string, 10);
+    if (isNaN(incidentId)) return res.status(400).json({ message: "Invalid incident ID" });
+    const { lat, lng } = req.body ?? {};
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      return res.status(400).json({ message: "lat and lng must be numbers" });
+    }
+    const incident = await storage.getIncident(incidentId, orgId);
+    if (!incident || !incident.isLive) return res.status(404).json({ message: "Live incident not found" });
+    if (!(await assertCommandAccess(req, (incident as { commandId?: number | null }).commandId))) {
+      return res.status(404).json({ message: "Incident not found" });
+    }
+    if (incident.userId !== userId) {
+      return res.status(403).json({ message: "Only the panicker can update panic location" });
+    }
+    const cats = await storage.getCategories(orgId);
+    const cat = cats.find((c) => c.id === incident.categoryId);
+    if (!cat || cat.name.toLowerCase() !== "panic") {
+      return res.status(400).json({ message: "Not a panic incident" });
+    }
+    if (incident.panicClosedAt) {
+      return res.status(400).json({ message: "Panic alert already closed" });
+    }
+    const user = await storage.getUserById(userId);
+    const fullName = user ? `${user.firstName} ${user.lastName}`.trim() : "A user";
+    const hadNoCoords =
+      incident.latitude == null &&
+      incident.liveStartLat == null &&
+      incident.destinationLat == null;
+    const updated = await syncPanicIncidentCoordinates(orgId, incidentId, lat, lng, fullName);
+    res.json(updated);
+    if (hadNoCoords) {
+      void broadcastPanicBannerRefresh(orgId);
+    }
+  });
+
   app.post("/api/panic", async (req, res) => {
     if (!req.currentUser) return res.status(401).json({ message: "Unauthorized" });
     const { organizationId: orgId, id: userId } = req.currentUser;
@@ -2903,13 +2993,39 @@ export async function registerRoutes(
     if (!(await assertCommandAccess(req, (incident as any).commandId))) {
       return res.status(404).json({ message: "Live incident not found" });
     }
-    const posUpdate: Record<string, unknown> = { responderLat: lat, responderLng: lng, responderPositionUpdatedAt: new Date() };
-    if (incident.liveStartLat == null) {
-      posUpdate.liveStartLat = lat;
-      posUpdate.liveStartLng = lng;
+    const cats = await storage.getCategories(orgId);
+    const panicCategory = cats.find((c) => c.id === incident.categoryId);
+    const isPanic = panicCategory?.name.toLowerCase() === "panic";
+    const isPanicker = incident.userId === userId;
+    const hadNoPanicCoords =
+      isPanic &&
+      isPanicker &&
+      incident.latitude == null &&
+      incident.liveStartLat == null &&
+      incident.destinationLat == null;
+
+    let updated: Incident | undefined;
+    if (isPanic && isPanicker) {
+      const user = await storage.getUserById(userId);
+      const fullName = user ? `${user.firstName} ${user.lastName}`.trim() : "A user";
+      updated = await syncPanicIncidentCoordinates(orgId, id, lat, lng, fullName);
+    } else {
+      const posUpdate: Record<string, unknown> = {
+        responderLat: lat,
+        responderLng: lng,
+        responderPositionUpdatedAt: new Date(),
+      };
+      if (incident.liveStartLat == null) {
+        posUpdate.liveStartLat = lat;
+        posUpdate.liveStartLng = lng;
+      }
+      updated = await storage.updateIncident(id, posUpdate, orgId);
     }
-    const updated = await storage.updateIncident(id, posUpdate, orgId);
     res.json(updated);
+
+    if (hadNoPanicCoords) {
+      void broadcastPanicBannerRefresh(orgId);
+    }
 
     // Fresh GPS received — reset stale alert timer so a future stale event will alert again
     gpsStaleLastSent.delete(id);
