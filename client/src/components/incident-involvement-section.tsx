@@ -668,12 +668,7 @@ function PersonEntryForm({
           canRemove={canRemove}
           testIdPrefix={prefix}
         />
-      ) : (
-        <p className="text-sm font-semibold flex items-center gap-2">
-          <User className="h-4 w-4" />
-          {title}
-        </p>
-      )}
+      ) : null}
 
       {(!multi || expanded) && (
         <div className={multi ? "pl-0 space-y-3" : "space-y-3"}>
@@ -781,12 +776,7 @@ function VehicleEntryForm({
           canRemove={canRemove}
           testIdPrefix={prefix}
         />
-      ) : (
-        <p className="text-sm font-semibold flex items-center gap-2">
-          <Car className="h-4 w-4" />
-          {title}
-        </p>
-      )}
+      ) : null}
 
       {(!multi || expanded) && (
         <div className="space-y-3">
@@ -950,6 +940,29 @@ export function IncidentInvolvementSection({
 
       {personInvolved && persons.length > 0 && (
         <div className="rounded-xl border bg-muted/20 p-4 space-y-4" data-testid="section-person-involved">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold flex items-center gap-2 min-w-0">
+              <User className="h-4 w-4 shrink-0" />
+              {persons.length === 1 ? "Person details" : `People (${persons.length})`}
+            </p>
+            {persons.length < MAX_INVOLVEMENT_PERSONS && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1 h-8 text-xs border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => {
+                  const next = [...persons, emptyPerson()];
+                  writePersons(next);
+                  setExpandedPerson(next.length - 1);
+                }}
+                data-testid="button-add-person-top"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add another
+              </Button>
+            )}
+          </div>
           {persons.map((person, index) => (
             <PersonEntryForm
               key={index}
@@ -976,28 +989,34 @@ export function IncidentInvolvementSection({
               }}
             />
           ))}
-          {persons.length < MAX_INVOLVEMENT_PERSONS && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full gap-1.5 text-xs"
-              onClick={() => {
-                const next = [...persons, emptyPerson()];
-                writePersons(next);
-                setExpandedPerson(next.length - 1);
-              }}
-              data-testid="button-add-person"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add another person ({persons.length}/{MAX_INVOLVEMENT_PERSONS})
-            </Button>
-          )}
         </div>
       )}
 
       {vehicleInvolved && vehicles.length > 0 && (
         <div className="rounded-xl border bg-muted/20 p-4 space-y-4" data-testid="section-vehicle-involved">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold flex items-center gap-2 min-w-0">
+              <Car className="h-4 w-4 shrink-0" />
+              {vehicles.length === 1 ? "Vehicle details" : `Vehicles (${vehicles.length})`}
+            </p>
+            {vehicles.length < MAX_INVOLVEMENT_VEHICLES && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1 h-8 text-xs border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => {
+                  const next = [...vehicles, emptyVehicle()];
+                  writeVehicles(next);
+                  setExpandedVehicle(next.length - 1);
+                }}
+                data-testid="button-add-vehicle-top"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add another
+              </Button>
+            )}
+          </div>
           {vehicles.map((vehicle, index) => (
             <VehicleEntryForm
               key={index}
@@ -1024,23 +1043,6 @@ export function IncidentInvolvementSection({
               }}
             />
           ))}
-          {vehicles.length < MAX_INVOLVEMENT_VEHICLES && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full gap-1.5 text-xs"
-              onClick={() => {
-                const next = [...vehicles, emptyVehicle()];
-                writeVehicles(next);
-                setExpandedVehicle(next.length - 1);
-              }}
-              data-testid="button-add-vehicle"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add another vehicle ({vehicles.length}/{MAX_INVOLVEMENT_VEHICLES})
-            </Button>
-          )}
         </div>
       )}
     </div>
