@@ -512,7 +512,7 @@ export default function LiveIncidentPage() {
   const { data: me } = useQuery<{ id: string }>({ queryKey: ["/api/auth/me"] });
 
   type LiveIncidentWithResponders = Incident & {
-    responders?: Array<{ id: number; userId: string; firstName: string; lastName: string; lastLat: number | null; lastLng: number | null; lastPositionAt: string | null; joinedAt: string }>;
+    responders?: Array<{ id: number; userId: string; firstName: string; lastName: string; lastLat: number | null; lastLng: number | null; lastPositionAt: string | null; joinedAt: string; arrivedAt: string | null; destinationLat: number | null; destinationLng: number | null; destinationName: string | null }>;
     responderFirstName?: string | null;
     responderLastName?: string | null;
     categoryName?: string | null;
@@ -798,8 +798,9 @@ export default function LiveIncidentPage() {
         const hdg = pos.coords.heading;
         if (hdg != null && !isNaN(hdg)) lastHeadingRef.current = hdg;
         // Retry route draw on first GPS fix — handles the race where drawRoute was
-        // called at mapsReady time but had no origin yet (lastPosRef was null).
-        if (stepsRef.current.length === 0 && destPositionRef.current && !navModeRef.current) {
+        // called before GPS had a fix (lastPosRef was null). Allow retry even in
+        // nav mode so joiners who tap Navigate before GPS is ready still get a route.
+        if (stepsRef.current.length === 0 && destPositionRef.current) {
           drawRoute(destPositionRef.current.lat, destPositionRef.current.lng, p);
         }
         if (navModeRef.current) {
@@ -836,6 +837,13 @@ export default function LiveIncidentPage() {
           });
         } else {
           mapInstanceRef.current.setCenter(p);
+        }
+        // Retry route draw on first GPS fix — handles the race where drawRoute was
+        // called before GPS had a fix (lastPosRef was null). Mirrors the same retry
+        // on the native path above. Covers web/PWA users who open from a panic
+        // notification and whose GPS fix arrives after the initial route-draw attempt.
+        if (stepsRef.current.length === 0 && destPositionRef.current) {
+          drawRoute(destPositionRef.current.lat, destPositionRef.current.lng, p);
         }
       }
       setGpsAccuracy(Math.round(accuracy));
