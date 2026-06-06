@@ -41,13 +41,12 @@ import EnableAlertsPage from "@/pages/enable-alerts";
 import PrivacyPage from "@/pages/privacy";
 import NotificationsPage from "@/pages/notifications";
 import ChatPage from "@/pages/chat";
-import { Bell, CreditCard, Loader2, LogOut, Download, X, Camera, CheckCheck, Radio, HelpCircle, MessageCircle, ArrowLeft } from "lucide-react";
+import { Bell, CreditCard, Loader2, LogOut, X, Camera, CheckCheck, Radio, HelpCircle, MessageCircle, ArrowLeft } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { type NotificationLog, timeAgo, formatDate, markAllRead } from "@/pages/notifications";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -57,7 +56,6 @@ import intelafriLogo from "@assets/IntelAfri_Logo_13_January_2025_2_177885188837
 import { PermissionPrimerModal } from "@/components/permission-primer-modal";
 import { PermissionDeniedBanner } from "@/components/permission-denied-banner";
 import { PushPermissionBanner } from "@/components/push-permission-banner";
-import { PwaInstallGate } from "@/components/pwa-install-gate";
 import { PanicAlertSiren } from "@/components/panic-alert-siren";
 import { SetupWizardController } from "@/components/setup-wizard";
 import { Capacitor } from "@capacitor/core";
@@ -529,7 +527,6 @@ function NotificationSheet({ open, onOpenChange, onMarkAllRead }: { open: boolea
 
 function AuthenticatedApp({ user }: { user: AuthUser }) {
   const [, navigate] = useLocation();
-  const pwa = usePwaInstall();
   const nativeApp = isCapacitorNative();
   const { subState: pushSubState, subscribe: subscribePush } = usePushSubscription(user.id);
   const { fcmState, enablePush, enabling: enablingNativePush } = useCapacitorPush(user.id);
@@ -751,21 +748,6 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
                   </TooltipContent>
                 </Tooltip>
               )}
-              {pwa.installPrompt && !pwa.dismissed && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={pwa.triggerInstall}
-                      data-testid="button-pwa-install"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Install App</TooltipContent>
-                </Tooltip>
-              )}
               <ThemeToggle />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -864,23 +846,6 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               <ArrowLeft className="h-5 w-5" />
             </button>
           </header>
-          )}
-          {pwa.showIosHint && (
-            <div className="shrink-0 bg-primary text-primary-foreground px-4 py-2.5 flex items-center justify-between gap-3 text-sm border-b border-primary/80">
-              <span>
-                <strong>Install OMT:</strong> Tap the Share button
-                <span className="mx-1 inline-block border border-primary-foreground/60 rounded px-1 text-xs font-mono">⎙</span>
-                then "Add to Home Screen"
-              </span>
-              <button
-                onClick={pwa.dismissIosHint}
-                className="shrink-0 opacity-80 hover:opacity-100 transition-opacity min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
-                aria-label="Dismiss"
-                data-testid="button-dismiss-ios-hint"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
           )}
           {nativeApp ? (
             <NativePushBanner fcmState={fcmState} onEnable={enablePush} enabling={enablingNativePush} />
@@ -1049,7 +1014,7 @@ function AppRouter() {
 }
 
 // Public marketing landing at "/" for unauthenticated visitors.
-// PWA install gate applies only after sign-in or invite onboarding (authenticated).
+// PWA install is not offered on the public site — distribution is admin-issued only.
 function RootRouter() {
   const [location] = useLocation();
   const { data: user, isLoading } = useQuery<AuthUser>({
@@ -1087,15 +1052,6 @@ function RootRouter() {
       );
     }
     return <PublicLanding />;
-  }
-
-  // Authenticated sessions (incl. post-invite onboarding): optional PWA install prompt.
-  if (user) {
-    return (
-      <PwaInstallGate>
-        <AppRouter />
-      </PwaInstallGate>
-    );
   }
 
   return <AppRouter />;

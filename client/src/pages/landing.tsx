@@ -20,12 +20,10 @@ import {
   GraduationCap,
   HardHat,
   Siren,
-  Smartphone,
-  Download,
 } from "lucide-react";
 import omtLogo from "@/assets/omt-logo-v2.png";
 import { FieldGallerySection, ProductPreviewsSection } from "@/components/marketing/product-previews";
-import { INTELAFRI_URL, PLAY_STORE_URL } from "@/lib/site-links";
+import { INTELAFRI_URL } from "@/lib/site-links";
 
 const WHATSAPP_NUMBER = "27675351325";
 const SALES_EMAIL = "sales@intelafri.org";
@@ -205,11 +203,6 @@ export default function LandingPage() {
             <a href="#contact" className="hidden text-sm text-muted-foreground hover:text-foreground sm:inline" data-testid="link-contact">
               Contact
             </a>
-            <a href="#install">
-              <Button size="sm" variant="outline" className="hidden sm:inline-flex" data-testid="button-get-app">
-                Get the app
-              </Button>
-            </a>
             <Link href="/login">
               <Button size="sm" data-testid="button-signin">
                 Sign in
@@ -252,17 +245,15 @@ export default function LandingPage() {
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </a>
-                <Link href="/login">
-                  <Button size="lg" variant="outline" className="w-full sm:w-auto" data-testid="button-cta-signin">
-                    Sign in
-                  </Button>
-                </Link>
-                <a href="#install">
-                  <Button size="lg" variant="ghost" className="w-full sm:w-auto" data-testid="button-cta-app">
-                    Get the app
-                  </Button>
-                </a>
-              </div>
+              <Link href="/login">
+                <Button size="lg" variant="outline" className="w-full sm:w-auto" data-testid="button-cta-signin">
+                  Sign in
+                </Button>
+              </Link>
+            </div>
+            <p className="mt-4 text-xs text-muted-foreground lg:text-left text-center">
+              App access is by invitation only — contact us or your organisation administrator.
+            </p>
             </div>
             <div className="flex justify-center lg:justify-end">
               <div className="relative w-full max-w-[300px]">
@@ -372,59 +363,6 @@ export default function LandingPage() {
         <p className="mt-8 text-center text-sm text-muted-foreground">
           Trusted by security teams across South Africa — from estates and campuses to mine sites and response units.
         </p>
-      </section>
-
-      {/* ── Install the app ──────────────────────────────────────────────── */}
-      <section id="install" className="border-y border-border bg-primary/[0.04]">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="mb-10 text-center">
-            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Get the app</h2>
-            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
-              Use OMT Pulse in the field on Android or install the web app on any device.
-            </p>
-          </div>
-          <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Smartphone className="h-5 w-5" />
-              </div>
-              <h3 className="mb-1 text-lg font-semibold">Android app</h3>
-              <p className="mb-4 text-sm text-muted-foreground">
-                Native maps, push alerts, and panic notifications on patrol phones.
-              </p>
-              {PLAY_STORE_URL ? (
-                <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" data-testid="link-play-store">
-                  <Button className="w-full">
-                    <Download className="mr-2 h-4 w-4" />
-                    Google Play
-                  </Button>
-                </a>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Google Play listing coming soon —{" "}
-                  <a href="#contact" className="font-medium text-primary hover:underline">
-                    contact us
-                  </a>{" "}
-                  for early access.
-                </p>
-              )}
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-6">
-              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Download className="h-5 w-5" />
-              </div>
-              <h3 className="mb-1 text-lg font-semibold">Web app (PWA)</h3>
-              <p className="mb-4 text-sm text-muted-foreground">
-                Sign in on your phone browser, then use your browser&apos;s &quot;Add to Home Screen&quot; option to install.
-              </p>
-              <Link href="/login">
-                <Button variant="outline" className="w-full" data-testid="button-pwa-signin">
-                  Sign in to install
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
       </section>
 
       {/* ── Get in touch — form + email + WhatsApp side-by-side ─────────── */}
@@ -622,17 +560,6 @@ export default function LandingPage() {
             <Link href="/privacy" className="hover:text-foreground" data-testid="link-footer-privacy">
               Privacy Policy
             </Link>
-            {PLAY_STORE_URL ? (
-              <a
-                href={PLAY_STORE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground"
-                data-testid="link-footer-play-store"
-              >
-                Google Play
-              </a>
-            ) : null}
             <a href={`mailto:${SALES_EMAIL}`} className="hover:text-foreground" data-testid="link-footer-email">
               {SALES_EMAIL}
             </a>
