@@ -80,12 +80,12 @@ export function Archon2FASettings({ open, onOpenChange, panelBg }: Props) {
   });
 
   const enableMutation = useMutation({
-    mutationFn: async (code: string) => {
+    mutationFn: async ({ code, secret }: { code: string; secret: string }) => {
       const res = await fetch("/api/archon/2fa/enable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, secret }),
       });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message ?? "Enable failed"); }
       return res.json() as Promise<{ backupCodes: string[] }>;
@@ -272,7 +272,7 @@ export function Archon2FASettings({ open, onOpenChange, panelBg }: Props) {
           <Button
             className="bg-primary hover:bg-primary/90 text-white"
             disabled={confirmCode.length !== 6 || enableMutation.isPending}
-            onClick={() => enableMutation.mutate(confirmCode)}
+            onClick={() => setupData && enableMutation.mutate({ code: confirmCode, secret: setupData.secret })}
             data-testid="button-archon-2fa-enable-confirm"
           >
             {enableMutation.isPending ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Enabling…</> : "Enable 2FA"}

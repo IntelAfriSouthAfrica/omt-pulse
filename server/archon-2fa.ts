@@ -89,7 +89,7 @@ export function verifyTotpToken(token: string, secret: string): boolean {
     const result = verifySync({
       secret,
       token: token.replace(/\s/g, ""),
-      epochTolerance: 30, // ±30 s — tolerates minor clock skew
+      epochTolerance: 90, // ±90 s — tolerates phone/server clock skew
     });
     return result.valid;
   } catch {

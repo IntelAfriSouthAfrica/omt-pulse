@@ -3757,18 +3757,34 @@ export async function registerRoutes(
     if (!process.env.ARCHON_TOTP_KEY) {
       return res.status(503).json({ message: "ARCHON_TOTP_KEY is not set on the server. Add a 64-char hex key to your environment variables before enabling 2FA." });
     }
-    const secret = generateTotpSecret();
-    req.session.archonTotpSetupSecret = secret;
-    const uri = getTotpUri(secret);
-    const qrDataUrl = await getTotpQrDataUrl(uri);
-    res.json({ qrDataUrl, secret });
+    try {
+      const secret = generateTotpSecret();
+      req.session.archonTotpSetupSecret = secret;
+      const uri = getTotpUri(secret);
+      const qrDataUrl = await getTotpQrDataUrl(uri);
+      // Persist session before client can call /enable (avoids PG session-store race).
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => (err ? reject(err) : resolve()));
+      });
+      res.json({ qrDataUrl, secret });
+    } catch (err) {
+      console.error("[archon/2fa/setup] session save failed:", err);
+      res.status(500).json({ message: "Could not start 2FA setup. Please try again." });
+    }
   });
 
   /** Confirm setup: verify TOTP code against session secret, persist encrypted secret + hashed backup codes. */
   app.post("/api/archon/2fa/enable", requireArchon, async (req, res) => {
-    const pendingSecret = req.session.archonTotpSetupSecret;
+    const { code, secret: bodySecret } = req.body ?? {};
+    let pendingSecret = req.session.archonTotpSetupSecret;
+    if (typeof bodySecret === "string" && bodySecret.trim()) {
+      const trimmed = bodySecret.trim();
+      if (pendingSecret && pendingSecret !== trimmed) {
+        return res.status(400).json({ message: "Setup expired. Close this dialog and click Enable 2FA again." });
+      }
+      pendingSecret = trimmed;
+    }
     if (!pendingSecret) return res.status(400).json({ message: "No pending 2FA setup. Call /setup first." });
-    const { code } = req.body;
     if (!code || typeof code !== "string") return res.status(400).json({ message: "Verification code required" });
     if (!verifyTotpToken(code, pendingSecret)) {
       return res.status(401).json({ message: "Code is incorrect. Make sure your app is set up with the QR code shown and try again." });
