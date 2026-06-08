@@ -3,6 +3,11 @@ import { createServer, type Server } from "http";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import {
+  encryptTotpSecret, decryptTotpSecret,
+  generateTotpSecret, getTotpUri, getTotpQrDataUrl,
+  verifyTotpToken, generateBackupCodes, hashBackupCodes, verifyBackupCode,
+} from "./archon-2fa";
 import multer from "multer";
 import webpush from "web-push";
 import admin from "firebase-admin";
@@ -3615,30 +3620,185 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
-  // --- Archon routes ---
+  // ── Archon routes ────────────────────────────────────────────────────────────
 
   function requireArchon(req: Request, res: Response, next: NextFunction) {
     if (!req.session.archonAuthed) return res.status(401).json({ message: "Archon authentication required" });
     next();
   }
 
+  // ── TOTP rate-limiter (in-memory, per-IP, 5 attempts / 15 min) ───────────────
+  const _totpAttempts = new Map<string, { count: number; resetAt: number }>();
+  const TOTP_MAX = 5;
+  const TOTP_WINDOW_MS = 15 * 60 * 1000;
+
+  function totpRateCheck(req: Request): { allowed: boolean; retryAfterMs: number } {
+    const key = `totp:${req.ip ?? req.socket?.remoteAddress ?? "unknown"}`;
+    const now = Date.now();
+    const entry = _totpAttempts.get(key);
+    if (!entry || now >= entry.resetAt) {
+      _totpAttempts.set(key, { count: 1, resetAt: now + TOTP_WINDOW_MS });
+      return { allowed: true, retryAfterMs: 0 };
+    }
+    if (entry.count >= TOTP_MAX) return { allowed: false, retryAfterMs: entry.resetAt - now };
+    entry.count++;
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  function totpRateReset(req: Request) {
+    const key = `totp:${req.ip ?? req.socket?.remoteAddress ?? "unknown"}`;
+    _totpAttempts.delete(key);
+  }
+
+  // ── archon_totp singleton row helper ─────────────────────────────────────────
+  type ArchonTotpRow = { secret: string; enabled: boolean; backupCodes: string[]; enabledAt: Date | null };
+
+  async function getArchon2fa(): Promise<ArchonTotpRow | null> {
+    const result = await db.execute<{
+      secret: string; enabled: boolean; backup_codes: string[]; enabled_at: Date | null;
+    }>(sql`SELECT secret, enabled, backup_codes, enabled_at FROM archon_totp WHERE id = 1`);
+    const row = result.rows[0];
+    if (!row) return null;
+    return { secret: row.secret, enabled: row.enabled, backupCodes: row.backup_codes ?? [], enabledAt: row.enabled_at };
+  }
+
+  // ── Step 1: password ─────────────────────────────────────────────────────────
   app.post("/api/archon/login", async (req, res) => {
     const { password } = req.body;
     if (!password || typeof password !== "string") return res.status(400).json({ message: "Password required" });
     const archonPassword = process.env.ARCHON_PASSWORD;
     if (!archonPassword) return res.status(503).json({ message: "Archon not configured" });
-    const match = password === archonPassword;
-    if (!match) return res.status(401).json({ message: "Invalid Archon password" });
+    if (password !== archonPassword) return res.status(401).json({ message: "Invalid Archon password" });
+
+    const twoFa = await getArchon2fa();
+    if (twoFa?.enabled) {
+      req.session.archonPasswordPassed = true;
+      req.session.archonAuthed = false;
+      return res.json({ success: true, requires2fa: true });
+    }
     req.session.archonAuthed = true;
-    res.json({ success: true });
+    req.session.archonPasswordPassed = false;
+    res.json({ success: true, requires2fa: false });
   });
 
   app.get("/api/archon/me", (req, res) => {
-    res.json({ authed: !!req.session.archonAuthed });
+    res.json({
+      authed: !!req.session.archonAuthed,
+      requiresTotp: !req.session.archonAuthed && !!req.session.archonPasswordPassed,
+    });
   });
 
   app.post("/api/archon/logout", (req, res) => {
     req.session.archonAuthed = false;
+    req.session.archonPasswordPassed = false;
+    req.session.archonTotpSetupSecret = undefined;
+    res.json({ success: true });
+  });
+
+  // ── Step 2: TOTP verification (rate-limited) ──────────────────────────────────
+  app.post("/api/archon/login/verify-totp", async (req, res) => {
+    if (!req.session.archonPasswordPassed) {
+      return res.status(401).json({ message: "Complete password login first." });
+    }
+    const { allowed, retryAfterMs } = totpRateCheck(req);
+    if (!allowed) {
+      const mins = Math.ceil(retryAfterMs / 60_000);
+      return res.status(429).json({ message: `Too many attempts. Try again in ${mins} minute${mins !== 1 ? "s" : ""}.` });
+    }
+    const { code } = req.body;
+    if (!code || typeof code !== "string") return res.status(400).json({ message: "Code required" });
+
+    const twoFa = await getArchon2fa();
+    if (!twoFa?.enabled) return res.status(400).json({ message: "2FA is not enabled." });
+
+    const secret = decryptTotpSecret(twoFa.secret);
+
+    // Try TOTP first
+    if (verifyTotpToken(code, secret)) {
+      totpRateReset(req);
+      req.session.archonAuthed = true;
+      req.session.archonPasswordPassed = false;
+      return res.json({ success: true });
+    }
+
+    // Try backup code
+    const backupIdx = await verifyBackupCode(code, twoFa.backupCodes);
+    if (backupIdx !== -1) {
+      const remaining = twoFa.backupCodes.filter((_, i) => i !== backupIdx);
+      await db.execute(sql`UPDATE archon_totp SET backup_codes = ${remaining}::text[], updated_at = NOW() WHERE id = 1`);
+      totpRateReset(req);
+      req.session.archonAuthed = true;
+      req.session.archonPasswordPassed = false;
+      return res.json({ success: true, backupCodeUsed: true, remainingBackupCodes: remaining.length });
+    }
+
+    return res.status(401).json({ message: "Invalid code. Check your authenticator app or use a backup code." });
+  });
+
+  // ── 2FA management (requires full Archon auth) ────────────────────────────────
+
+  app.get("/api/archon/2fa/status", requireArchon, async (_req, res) => {
+    const twoFa = await getArchon2fa();
+    res.json({
+      enabled: !!twoFa?.enabled,
+      enabledAt: twoFa?.enabledAt ?? null,
+      backupCodesRemaining: twoFa?.backupCodes?.length ?? 0,
+    });
+  });
+
+  /** Begin setup: generate secret, store in session, return QR data URL. */
+  app.post("/api/archon/2fa/setup", requireArchon, async (req, res) => {
+    if (!process.env.ARCHON_TOTP_KEY) {
+      return res.status(503).json({ message: "ARCHON_TOTP_KEY is not set on the server. Add a 64-char hex key to your environment variables before enabling 2FA." });
+    }
+    const secret = generateTotpSecret();
+    req.session.archonTotpSetupSecret = secret;
+    const uri = getTotpUri(secret);
+    const qrDataUrl = await getTotpQrDataUrl(uri);
+    res.json({ qrDataUrl, secret });
+  });
+
+  /** Confirm setup: verify TOTP code against session secret, persist encrypted secret + hashed backup codes. */
+  app.post("/api/archon/2fa/enable", requireArchon, async (req, res) => {
+    const pendingSecret = req.session.archonTotpSetupSecret;
+    if (!pendingSecret) return res.status(400).json({ message: "No pending 2FA setup. Call /setup first." });
+    const { code } = req.body;
+    if (!code || typeof code !== "string") return res.status(400).json({ message: "Verification code required" });
+    if (!verifyTotpToken(code, pendingSecret)) {
+      return res.status(401).json({ message: "Code is incorrect. Make sure your app is set up with the QR code shown and try again." });
+    }
+    const plainCodes = generateBackupCodes(8);
+    const hashedCodes = await hashBackupCodes(plainCodes);
+    const encryptedSecret = encryptTotpSecret(pendingSecret);
+    await db.execute(sql`
+      INSERT INTO archon_totp (id, secret, enabled, backup_codes, enabled_at, updated_at)
+      VALUES (1, ${encryptedSecret}, TRUE, ${hashedCodes}::text[], NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        secret       = EXCLUDED.secret,
+        enabled      = TRUE,
+        backup_codes = EXCLUDED.backup_codes,
+        enabled_at   = NOW(),
+        updated_at   = NOW()
+    `);
+    req.session.archonTotpSetupSecret = undefined;
+    res.json({ success: true, backupCodes: plainCodes });
+  });
+
+  /** Disable 2FA — caller must supply a valid TOTP or backup code to confirm. */
+  app.post("/api/archon/2fa/disable", requireArchon, async (req, res) => {
+    const twoFa = await getArchon2fa();
+    if (!twoFa?.enabled) return res.status(400).json({ message: "2FA is not currently enabled." });
+    const { code } = req.body;
+    if (!code || typeof code !== "string") return res.status(400).json({ message: "Verification code required" });
+    const secret = decryptTotpSecret(twoFa.secret);
+    const totpOk = verifyTotpToken(code, secret);
+    const backupIdx = totpOk ? -1 : await verifyBackupCode(code, twoFa.backupCodes);
+    if (!totpOk && backupIdx === -1) {
+      return res.status(401).json({ message: "Invalid code. Provide a TOTP code or a backup code to disable 2FA." });
+    }
+    await db.execute(sql`
+      UPDATE archon_totp SET enabled = FALSE, secret = '', backup_codes = '{}'::text[], updated_at = NOW() WHERE id = 1
+    `);
     res.json({ success: true });
   });
 

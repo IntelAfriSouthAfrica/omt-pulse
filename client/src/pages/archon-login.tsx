@@ -39,9 +39,13 @@ export default function ArchonLoginPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: { success: boolean; requires2fa: boolean }) => {
       queryClient.removeQueries({ queryKey: ["/api/archon/me"] });
-      navigate("/archon/dashboard");
+      if (data.requires2fa) {
+        navigate("/archon/verify");
+      } else {
+        navigate("/archon/dashboard");
+      }
     },
     onError: (err: any) => {
       setErrorMsg(err.message || "Invalid password");

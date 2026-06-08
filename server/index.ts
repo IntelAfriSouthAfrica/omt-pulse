@@ -17,6 +17,10 @@ declare module "express-session" {
   interface SessionData {
     userId: string;
     archonAuthed: boolean;
+    /** Password verified but TOTP not yet supplied — gating flag for /archon/verify page. */
+    archonPasswordPassed?: boolean;
+    /** Ephemeral: plaintext TOTP secret generated during setup, cleared on enable/cancel. */
+    archonTotpSetupSecret?: string;
     // Active command scope for the current session.
     // - number: a specific command_id the user is currently viewing
     // - "all": superadmin override — see every command in the org
@@ -239,6 +243,18 @@ app.use((req, res, next) => {
   `);
   await safeMigrate("fcm_tokens.user_idx", sql`CREATE INDEX IF NOT EXISTS fcm_tokens_user_idx ON fcm_tokens (user_id)`);
   await safeMigrate("fcm_tokens.org_idx", sql`CREATE INDEX IF NOT EXISTS fcm_tokens_org_idx ON fcm_tokens (organization_id)`);
+
+  // Archon TOTP 2FA — singleton table (id=1 always)
+  await safeMigrate("archon_totp.create", sql`
+    CREATE TABLE IF NOT EXISTS archon_totp (
+      id          INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      secret      TEXT NOT NULL DEFAULT '',
+      enabled     BOOLEAN NOT NULL DEFAULT FALSE,
+      backup_codes TEXT[] NOT NULL DEFAULT '{}',
+      enabled_at  TIMESTAMP,
+      updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
 
   // Chat tables
   await db.execute(sql`

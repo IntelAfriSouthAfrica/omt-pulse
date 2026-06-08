@@ -15,10 +15,11 @@ import {
   UserCheck, UserX, Trash2, ChevronDown, ChevronRight, Plus, Building2,
   Pencil, ToggleLeft, ToggleRight, FileText, TrendingUp, UserPlus,
   Download, Activity, Paperclip, CalendarDays, UserRound, Bell, MapPin,
-  Share2,
+  Share2, ShieldCheck,
 } from "lucide-react";
 import { ArchonOnboardingShare } from "@/components/archon-onboarding-share";
 import type { OnboardingUserInfo } from "@/lib/onboarding-messages";
+import { Archon2FASettings } from "@/components/archon-2fa-settings";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -390,6 +391,7 @@ export default function ArchonDashboard() {
   const [newPassword, setNewPassword] = useState("");
   const [onboardingShare, setOnboardingShare] = useState<OnboardingUserInfo | null>(null);
   const [showOnboardingShare, setShowOnboardingShare] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
 
   // Form state
   const [newClientForm, setNewClientForm] = useState<NewClientForm>(emptyNewClient());
@@ -697,6 +699,16 @@ export default function ArchonDashboard() {
             </Button>
             <Button variant="ghost" size="sm" className="text-white/60 hover:text-white gap-1.5" onClick={refetchAll} data-testid="button-archon-refresh">
               <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="border border-primary/30 text-primary/70 hover:text-primary hover:bg-primary/10 gap-1.5"
+              onClick={() => setShowSecurity(true)}
+              data-testid="button-archon-security"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Security
             </Button>
             <Button
               variant="outline"
@@ -1316,6 +1328,12 @@ export default function ArchonDashboard() {
         open={showOnboardingShare}
         onOpenChange={setShowOnboardingShare}
         user={onboardingShare}
+        panelBg={panelBg}
+      />
+
+      <Archon2FASettings
+        open={showSecurity}
+        onOpenChange={setShowSecurity}
         panelBg={panelBg}
       />
     </div>

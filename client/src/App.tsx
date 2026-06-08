@@ -34,6 +34,7 @@ import CommandsPage from "@/pages/commands";
 import VisibilityPage from "@/pages/visibility";
 import ArchonDashboard from "@/pages/archon-dashboard";
 import ArchonLoginPage from "@/pages/archon-login";
+import ArchonTotpPage from "@/pages/archon-totp";
 import OnboardingPage from "@/pages/onboarding";
 import InvitePage from "@/pages/invite";
 import LandingPage from "@/pages/landing";
@@ -961,6 +962,7 @@ function ArchonApp() {
   return (
     <Switch>
       <Route path="/archon" component={ArchonLoginPage} />
+      <Route path="/archon/verify" component={ArchonTotpPage} />
       <Route path="/archon/dashboard" component={ArchonDashboard} />
       <Route component={RedirectToArchonLogin} />
     </Switch>
