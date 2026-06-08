@@ -4,7 +4,7 @@
  * No database access here — purely stateless utilities.
  */
 import crypto from "crypto";
-import { authenticator } from "otplib";
+import { generateSecret, generateURI, verifySync } from "otplib";
 import QRCode from "qrcode";
 import bcrypt from "bcrypt";
 
@@ -57,14 +57,18 @@ export function decryptTotpSecret(stored: string): string {
 
 // ── TOTP ────────────────────────────────────────────────────────────────────
 
-/** Generate a fresh base32 TOTP secret (256-bit). */
+/** Generate a fresh base32 TOTP secret (20 bytes / 160-bit). */
 export function generateTotpSecret(): string {
-  return authenticator.generateSecret(32);
+  return generateSecret({ length: 20 });
 }
 
 /** Build the otpauth:// URI that authenticator apps scan. */
 export function getTotpUri(secret: string): string {
-  return authenticator.keyuri("IntelAfri Archon", "OMT Pulse", secret);
+  return generateURI({
+    issuer: "OMT Pulse",
+    label: "IntelAfri Archon",
+    secret,
+  });
 }
 
 /** Render the otpauth URI as a PNG data URL for display in an <img>. */
@@ -82,8 +86,12 @@ export async function getTotpQrDataUrl(uri: string): Promise<string> {
  */
 export function verifyTotpToken(token: string, secret: string): boolean {
   try {
-    authenticator.options = { window: 1 };
-    return authenticator.verify({ token: token.replace(/\s/g, ""), secret });
+    const result = verifySync({
+      secret,
+      token: token.replace(/\s/g, ""),
+      epochTolerance: 30, // ±30 s — tolerates minor clock skew
+    });
+    return result.valid;
   } catch {
     return false;
   }
