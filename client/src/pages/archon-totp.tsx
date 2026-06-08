@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, Loader2, KeyRound, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ type MeResponse = { authed: boolean; requiresTotp: boolean };
 
 export default function ArchonTotpPage() {
   const [, navigate] = useLocation();
+  const queryClient = useQueryClient();
   const [code, setCode] = useState("");
   const [useBackup, setUseBackup] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +42,7 @@ export default function ArchonTotpPage() {
       return res.json();
     },
     onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ["/api/archon/me"] });
       navigate("/archon/dashboard");
     },
     onError: (err: Error) => {

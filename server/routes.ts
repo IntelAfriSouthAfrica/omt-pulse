@@ -3668,6 +3668,12 @@ export async function registerRoutes(
     return { secret: row.secret, enabled: row.enabled, backupCodes: row.backup_codes ?? [], enabledAt: row.enabled_at };
   }
 
+  function saveArchonSession(req: Request): Promise<void> {
+    return new Promise((resolve, reject) => {
+      req.session.save((err) => (err ? reject(err) : resolve()));
+    });
+  }
+
   // ── Step 1: password ─────────────────────────────────────────────────────────
   app.post("/api/archon/login", async (req, res) => {
     const { password } = req.body;
@@ -3676,15 +3682,22 @@ export async function registerRoutes(
     if (!archonPassword) return res.status(503).json({ message: "Archon not configured" });
     if (password !== archonPassword) return res.status(401).json({ message: "Invalid Archon password" });
 
-    const twoFa = await getArchon2fa();
-    if (twoFa?.enabled) {
-      req.session.archonPasswordPassed = true;
-      req.session.archonAuthed = false;
-      return res.json({ success: true, requires2fa: true });
+    try {
+      const twoFa = await getArchon2fa();
+      if (twoFa?.enabled) {
+        req.session.archonPasswordPassed = true;
+        req.session.archonAuthed = false;
+        await saveArchonSession(req);
+        return res.json({ success: true, requires2fa: true });
+      }
+      req.session.archonAuthed = true;
+      req.session.archonPasswordPassed = false;
+      await saveArchonSession(req);
+      res.json({ success: true, requires2fa: false });
+    } catch (err) {
+      console.error("[archon/login] session save failed:", err);
+      res.status(500).json({ message: "Login failed. Please try again." });
     }
-    req.session.archonAuthed = true;
-    req.session.archonPasswordPassed = false;
-    res.json({ success: true, requires2fa: false });
   });
 
   app.get("/api/archon/me", (req, res) => {
@@ -3724,7 +3737,13 @@ export async function registerRoutes(
       totpRateReset(req);
       req.session.archonAuthed = true;
       req.session.archonPasswordPassed = false;
-      return res.json({ success: true });
+      try {
+        await saveArchonSession(req);
+        return res.json({ success: true });
+      } catch (err) {
+        console.error("[archon/verify-totp] session save failed:", err);
+        return res.status(500).json({ message: "Verification succeeded but session could not be saved. Try again." });
+      }
     }
 
     // Try backup code
@@ -3735,7 +3754,13 @@ export async function registerRoutes(
       totpRateReset(req);
       req.session.archonAuthed = true;
       req.session.archonPasswordPassed = false;
-      return res.json({ success: true, backupCodeUsed: true, remainingBackupCodes: remaining.length });
+      try {
+        await saveArchonSession(req);
+        return res.json({ success: true, backupCodeUsed: true, remainingBackupCodes: remaining.length });
+      } catch (err) {
+        console.error("[archon/verify-totp] session save failed:", err);
+        return res.status(500).json({ message: "Verification succeeded but session could not be saved. Try again." });
+      }
     }
 
     return res.status(401).json({ message: "Invalid code. Check your authenticator app or use a backup code." });
