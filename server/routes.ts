@@ -3650,6 +3650,12 @@ export async function registerRoutes(
     _totpAttempts.delete(key);
   }
 
+  /** Bind a JS string[] as a PostgreSQL text[] (drizzle sql`${arr}::text[]` does not work). */
+  function sqlTextArray(values: string[]) {
+    if (values.length === 0) return sql`'{}'::text[]`;
+    return sql`ARRAY[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`;
+  }
+
   // ── archon_totp singleton row helper ─────────────────────────────────────────
   type ArchonTotpRow = { secret: string; enabled: boolean; backupCodes: string[]; enabledAt: Date | null };
 
@@ -3725,7 +3731,7 @@ export async function registerRoutes(
     const backupIdx = await verifyBackupCode(code, twoFa.backupCodes);
     if (backupIdx !== -1) {
       const remaining = twoFa.backupCodes.filter((_, i) => i !== backupIdx);
-      await db.execute(sql`UPDATE archon_totp SET backup_codes = ${remaining}::text[], updated_at = NOW() WHERE id = 1`);
+      await db.execute(sql`UPDATE archon_totp SET backup_codes = ${sqlTextArray(remaining)}, updated_at = NOW() WHERE id = 1`);
       totpRateReset(req);
       req.session.archonAuthed = true;
       req.session.archonPasswordPassed = false;
@@ -3772,7 +3778,7 @@ export async function registerRoutes(
     const encryptedSecret = encryptTotpSecret(pendingSecret);
     await db.execute(sql`
       INSERT INTO archon_totp (id, secret, enabled, backup_codes, enabled_at, updated_at)
-      VALUES (1, ${encryptedSecret}, TRUE, ${hashedCodes}::text[], NOW(), NOW())
+      VALUES (1, ${encryptedSecret}, TRUE, ${sqlTextArray(hashedCodes)}, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         secret       = EXCLUDED.secret,
         enabled      = TRUE,

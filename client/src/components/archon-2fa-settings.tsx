@@ -96,7 +96,7 @@ export function Archon2FASettings({ open, onOpenChange, panelBg }: Props) {
       setView("backup-codes");
       queryClient.invalidateQueries({ queryKey: ["/api/archon/2fa/status"] });
     },
-    onError: (e: Error) => toast({ title: "Incorrect code", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => toast({ title: "Could not enable 2FA", description: e.message, variant: "destructive" }),
   });
 
   const disableMutation = useMutation({
