@@ -762,6 +762,11 @@ export default function LiveIncidentPage() {
       const accuracy = pos.coords.accuracy;
       const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       lastPosRef.current = p;
+      // A real fix arrived — clear the joiner "location off" guide if it was
+      // showing. Without this the guide lingers when GPS recovers on its own
+      // (e.g. user enabled location in system settings and returned). Setting
+      // to the same value is a no-op re-render, so the ~1 Hz call is harmless.
+      setJoinerGpsBlocked(false);
       // Speed from Geolocation API — only valid when positive; null indoors / on first fix.
       const speedMs = pos.coords.speed;
       setSpeedKmh(speedMs != null && speedMs >= 0 ? Math.round(speedMs * 3.6) : null);
