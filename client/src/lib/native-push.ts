@@ -180,21 +180,52 @@ export async function enableNativePush(): Promise<void> {
 
   const token = await waitForFcmToken(PushNotifications);
   await registerNativePushToken(token);
+  rememberSyncedToken(token);
+}
+
+const LAST_FCM_TOKEN_KEY = "omt_last_fcm_token";
+
+function readLastSyncedToken(): string | null {
+  try {
+    return localStorage.getItem(LAST_FCM_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberSyncedToken(token: string): void {
+  try {
+    localStorage.setItem(LAST_FCM_TOKEN_KEY, token);
+  } catch {
+    /* ignore storage errors */
+  }
 }
 
 /**
- * Boot-time sync: if permission is granted and the server already has a token,
- * skip FCM register. Otherwise register and POST the token.
+ * Boot/foreground sync: when permission is granted, always read the CURRENT
+ * device FCM token and sync it to the server when it has changed.
+ *
+ * The previous implementation skipped registration whenever the server already
+ * had *a* token for the user. But FCM rotates/invalidates tokens (app update,
+ * data clear, OS refresh, reinstall). When that happened, the device opened,
+ * saw "server already has a token" (the OLD, now-dead one), and never replaced
+ * it — leaving that device permanently undeliverable. We now re-register
+ * whenever the live device token differs from the last one we synced, or the
+ * server has no token on record.
  */
 export async function syncNativePushIfNeeded(): Promise<NativePushStatus> {
   const perm = await checkNativePushStatus();
   if (perm === "denied") return "denied";
   if (perm === "needs-enable") return "needs-enable";
 
-  if (await fetchFcmRegisteredOnServer()) return "granted";
-
   try {
-    await enableNativePush();
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const token = await waitForFcmToken(PushNotifications);
+    const changed = token !== readLastSyncedToken();
+    if (changed || !(await fetchFcmRegisteredOnServer())) {
+      await registerNativePushToken(token);
+      rememberSyncedToken(token);
+    }
     return "granted";
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

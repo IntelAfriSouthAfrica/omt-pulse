@@ -115,8 +115,22 @@ async function sendFcmBatch(
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (r.status === "rejected") {
+      const reason = r.reason as { code?: string; errorInfo?: { code?: string } } | undefined;
+      const code = reason?.code ?? reason?.errorInfo?.code ?? "";
       const errMsg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-      if (errMsg.includes("registration-token-not-registered") || errMsg.includes("invalid-registration-token")) {
+      // Firebase Admin reports dead tokens via the error CODE
+      // (messaging/registration-token-not-registered), while the human-readable
+      // MESSAGE is "Requested entity was not found." The old check only matched
+      // the message text, so stale tokens were never pruned and piled up — and
+      // every live-incident push wasted a send on a device that could never
+      // receive it. Match the code (with message fallbacks) so they are removed.
+      const isDeadToken =
+        code === "messaging/registration-token-not-registered" ||
+        code === "messaging/invalid-registration-token" ||
+        errMsg.includes("registration-token-not-registered") ||
+        errMsg.includes("invalid-registration-token") ||
+        errMsg.includes("Requested entity was not found");
+      if (isDeadToken) {
         storage.deleteFcmToken(tokens[i]).catch(() => {});
       } else {
         console.error("[FCM] send failed for token:", errMsg);
