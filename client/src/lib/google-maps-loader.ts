@@ -6,7 +6,12 @@ export function resetGoogleMapsLoader(): void {
   delete (window as any).gm_authFailure;
 }
 
-export function loadGoogleMaps(): Promise<void> {
+export type LoadGoogleMapsOptions = {
+  /** Default 15s web / callers may pass 45s for slow native WebViews. */
+  timeoutMs?: number;
+};
+
+export function loadGoogleMaps(opts?: LoadGoogleMapsOptions): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   if (window.google?.maps?.Map) return Promise.resolve();
   if (loadPromise) return loadPromise;
@@ -15,6 +20,8 @@ export function loadGoogleMaps(): Promise<void> {
   if (!key) {
     return Promise.reject(new Error("Google Maps API key is not configured in this build"));
   }
+
+  const timeoutMs = opts?.timeoutMs ?? 15_000;
 
   loadPromise = new Promise((resolve, reject) => {
     const callbackName = "__gmapsLoaded";
@@ -47,7 +54,10 @@ export function loadGoogleMaps(): Promise<void> {
     (window as any).gm_authFailure = () =>
       fail("Google Maps authentication failed — check API key restrictions for https://omtpulse.com");
 
-    const timer = setTimeout(() => fail("Google Maps load timed out after 15s"), 15000);
+    const timer = setTimeout(
+      () => fail(`Google Maps load timed out after ${Math.round(timeoutMs / 1000)}s`),
+      timeoutMs,
+    );
 
     const existing = document.querySelector('script[data-omt-gmaps="1"]');
     if (existing) {
