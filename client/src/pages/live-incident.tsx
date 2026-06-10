@@ -20,7 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
-import { loadGoogleMaps } from "@/lib/google-maps-loader";
+import { loadGoogleMaps, resetGoogleMapsLoader } from "@/lib/google-maps-loader";
 import { speak, stopSpeaking } from "@/lib/tts";
 import { Capacitor } from '@capacitor/core';
 import CapacitorMap, { type CapacitorMapHandle } from '@/components/CapacitorMap';
@@ -412,6 +412,10 @@ export default function LiveIncidentPage() {
   // "Map unavailable" error UI. (The former on-screen debug overlay that also
   // consumed these was removed for the Play Store release.)
   const [mapsErrorMsg, setMapsErrorMsg] = useState<string | null>(null);
+  // Native: JS API (search/routes) can fail while the Capacitor map still works.
+  // Don't replace the whole map with an error panel in that case.
+  const [jsApiDegraded, setJsApiDegraded] = useState(false);
+  const [jsApiRetrying, setJsApiRetrying] = useState(false);
   const [geocoderReady, setGeocoderReady] = useState(false);
   const [autocompleteReady, setAutocompleteReady] = useState(false);
   const [nativeMapStatus, setNativeMapStatus] = useState<"idle" | "creating" | "ready" | "timeout" | "error">("idle");
@@ -1524,10 +1528,16 @@ export default function LiveIncidentPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline]);
 
-  useEffect(() => {
-    // Always load the JS API — it's needed for search/geocoding on both web and
-    // native, and as a map fallback if native Capacitor map fails.
-    loadGoogleMaps().then(() => {
+  const initJsApi = useCallback((attempt = 0) => {
+    const maxAttempts = isNative ? 3 : 1;
+    const timeoutMs = isNative ? 45_000 : 15_000;
+    if (attempt > 0) setJsApiRetrying(true);
+
+    loadGoogleMaps({ timeoutMs }).then(() => {
+      setJsApiDegraded(false);
+      setJsApiRetrying(false);
+      setMapsError(false);
+      setMapsErrorMsg(null);
       setMapsReady(true);
       // Initialize search/geocoder services as soon as the JS API loads.
       // These work in the Capacitor WebView and avoid CORS issues from
@@ -1541,11 +1551,30 @@ export default function LiveIncidentPage() {
         setAutocompleteReady(true);
       }
     }).catch((err) => {
-      setMapsError(true);
-      setMapsErrorMsg(err?.message ?? String(err));
+      const msg = err?.message ?? String(err);
+      if (isNative && attempt < maxAttempts - 1) {
+        resetGoogleMapsLoader();
+        window.setTimeout(() => initJsApi(attempt + 1), 2_000);
+        return;
+      }
+      setJsApiRetrying(false);
+      setMapsErrorMsg(msg);
+      if (isNative && !nativeMapFailed) {
+        // Keep the native map visible; only search/routes need the JS API.
+        setJsApiDegraded(true);
+        setMapsError(false);
+      } else {
+        setMapsError(true);
+      }
     });
+  }, [isNative, nativeMapFailed]);
+
+  useEffect(() => {
+    // Always load the JS API — it's needed for search/geocoding on both web and
+    // native, and as a map fallback if native Capacitor map fails.
+    initJsApi();
     return () => stopTracking();
-  }, []);
+  }, [initJsApi]);
 
   useEffect(() => {
     if (!useWebMap || !mapsReady || !mapRef.current || mapInstanceRef.current) return;
@@ -3488,7 +3517,35 @@ export default function LiveIncidentPage() {
         )}
 
         {/* Map always mounted — avoids losing the google.maps.Map instance on state change */}
-        {mapsError ? (
+        {isNative && (jsApiDegraded || jsApiRetrying) && !mapsError && (
+          <div
+            className="shrink-0 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-950 dark:text-amber-100 space-y-2"
+            data-testid="banner-js-api-degraded"
+          >
+            <p>
+              {jsApiRetrying
+                ? "Loading map services… destination search may take a moment on slow networks."
+                : "Map search is slow or unavailable. The map below should still work — check WiFi/data, then retry."}
+            </p>
+            {!jsApiRetrying && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={() => {
+                  resetGoogleMapsLoader();
+                  setJsApiDegraded(false);
+                  initJsApi();
+                }}
+                data-testid="button-retry-js-api"
+              >
+                Retry map services
+              </Button>
+            )}
+          </div>
+        )}
+        {mapsError && useWebMap ? (
           <div className="flex-1 rounded-lg border border-destructive/40 bg-destructive/5 flex items-center justify-center min-h-[200px]" data-testid="map-error">
             <div className="text-center px-6 py-8 space-y-2 max-w-md">
               <MapPin className="h-8 w-8 mx-auto text-destructive/60" />
@@ -3499,6 +3556,20 @@ export default function LiveIncidentPage() {
               <p className="text-xs text-muted-foreground">
                 API key in build: {import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? "configured" : "missing"}
               </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() => {
+                  resetGoogleMapsLoader();
+                  setMapsError(false);
+                  initJsApi();
+                }}
+                data-testid="button-retry-map-load"
+              >
+                Retry
+              </Button>
             </div>
           </div>
         ) : (
