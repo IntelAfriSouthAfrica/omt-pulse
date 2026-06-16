@@ -16,6 +16,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ConnectivityBadge } from "@/components/connectivity-badge";
 import { SubscriptionWall } from "@/components/subscription-wall";
 import NotFound from "@/pages/not-found";
 import OccurrenceBook from "@/pages/occurrence-book";
@@ -707,7 +708,12 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
     <SidebarProvider style={style as React.CSSProperties}>
       <div className="flex h-screen w-full">
         <AppSidebar user={user} onLogout={() => logoutMutation.mutate()} avatarPreview={avatarPreview} />
-        <div className="flex flex-col flex-1 min-w-0">
+        <div className="flex flex-col flex-1 min-w-0 relative">
+          {location !== "/dashboard" &&
+            location !== "/live-incident" &&
+            location !== "/live-severity" && (
+            <ConnectivityBadge className="absolute top-2 right-2 z-[60]" />
+          )}
           {/* Full INTEL header — dashboard only */}
           {location === "/dashboard" && (
           <header className="grid grid-cols-[1fr_auto_1fr] items-center p-2 border-b shrink-0 gap-2">
@@ -726,8 +732,9 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               />
             </div>
 
-            {/* Right — billing, theme, avatar */}
-            <div className="flex items-center gap-1 justify-end">
+            {/* Right — connectivity, billing, theme, avatar */}
+            <div className="flex items-center gap-1.5 justify-end">
+              <ConnectivityBadge />
               {user.role === "administrator" && (
                 <Tooltip>
                   <TooltipTrigger asChild>

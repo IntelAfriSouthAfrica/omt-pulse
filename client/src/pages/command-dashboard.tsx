@@ -170,7 +170,7 @@ function LiveIncidentDashboardCard({
 }) {
   if (incidents.length === 0) return null;
 
-  return (
+    return (
     <Card
       className={
         hasRedLive
@@ -194,7 +194,7 @@ function LiveIncidentDashboardCard({
           <span className="ml-auto text-[10px] text-muted-foreground uppercase tracking-wide">
             {isDispatch ? "Tap → Live Monitor" : "Tap to join"}
           </span>
-        </div>
+    </div>
       </CardHeader>
       <CardContent className="px-0 pb-0">
         <ul className="divide-y divide-border">
@@ -272,8 +272,8 @@ function LiveIncidentDashboardRow({
               aria-hidden
             >
               <Radio className="h-5 w-5 text-white" strokeWidth={2.25} />
-            </div>
-          ) : (
+                </div>
+              ) : (
             <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-muted">
               <Radio className="h-5 w-5 text-muted-foreground" strokeWidth={2.25} />
             </div>
@@ -288,7 +288,7 @@ function LiveIncidentDashboardRow({
                       className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${severityBadgeClass(inc.severity)}`}
                       data-testid={`badge-severity-live-${inc.id}`}
                     >
-                      <span
+                            <span
                         className={`h-1.5 w-1.5 rounded-full ${severityDotClass(inc.severity)} ${inc.severity === "red" ? "animate-pulse" : ""}`}
                       />
                       {inc.severity}
@@ -298,12 +298,12 @@ function LiveIncidentDashboardRow({
                     <span className="inline-flex shrink-0 items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/25">
                       ESCALATED
                     </span>
-                  )}
-                </div>
+                                )}
+                              </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">#{inc.id}</p>
-              </div>
+                            </div>
               <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-            </div>
+                          </div>
 
             {isMine ? (
               <p className="text-sm font-medium text-primary mt-1">Your live incident</p>
@@ -319,7 +319,7 @@ function LiveIncidentDashboardRow({
               <MapPin className="h-3.5 w-3.5 shrink-0 text-primary/80" />
               <span className="truncate">
                 {panicGpsPending ? "GPS pending — panicker location not shared yet" : locText}
-              </span>
+                                  </span>
             </p>
 
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -327,7 +327,7 @@ function LiveIncidentDashboardRow({
                 <span className="inline-flex items-center gap-1 text-muted-foreground">
                   <Clock className="h-3 w-3 shrink-0" />
                   {minsAgo === 0 ? "Just started" : `${minsAgo} min ago`}
-                </span>
+                                  </span>
               )}
               {distanceKm != null && (
                 <span
@@ -338,12 +338,12 @@ function LiveIncidentDashboardRow({
                 >
                   <Navigation className="h-3 w-3 shrink-0" />
                   {fmtDistanceKm(distanceKm)} away · ~{estimateDriveMinutes(distanceKm)} min drive
-                </span>
-              )}
+                                  </span>
+                                )}
               {!isMine && !alreadyJoined && gpsUnavailable && target && (
                 <span className="text-muted-foreground">Enable location for distance</span>
-              )}
-            </div>
+                            )}
+                              </div>
 
             {tooFar && !isDispatch && (
               <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5 font-medium">
@@ -360,7 +360,7 @@ function LiveIncidentDashboardRow({
                 Tap to join — map updates when their GPS is available
               </p>
             )}
-          </div>
+                                      </div>
         </div>
       </button>
     </li>
@@ -379,15 +379,17 @@ function ActionTile({
   subtitle: string;
   icon: LucideIcon;
   onClick: () => void;
-  variant?: "primary" | "live";
+  variant?: "primary" | "live" | "panic";
   testId: string;
 }) {
   const surface =
-    variant === "live"
+    variant === "panic"
+      ? "bg-gradient-to-br from-red-600 to-red-700 text-white shadow-lg shadow-red-600/30 ring-2 ring-red-500/40"
+      : variant === "live"
       ? "bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-lg shadow-orange-500/25"
       : "bg-gradient-to-br from-primary to-primary/85 text-primary-foreground shadow-lg shadow-primary/20";
   const subtitleClass =
-    variant === "live" ? "text-white/85" : "text-primary-foreground/80";
+    variant === "live" || variant === "panic" ? "text-white/85" : "text-primary-foreground/80";
 
   return (
     <button
@@ -399,11 +401,11 @@ function ActionTile({
       <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20">
         <span className="pointer-events-none absolute inset-0 rounded-xl border-2 border-white/50 action-tile-ring" aria-hidden />
         <Icon className="relative h-6 w-6 action-tile-icon-pulse" strokeWidth={2.25} />
-      </div>
+                                    </div>
       <div className="flex-1 min-w-0">
         <p className="font-bold text-base leading-tight">{title}</p>
         <p className={`text-sm mt-0.5 ${subtitleClass}`}>{subtitle}</p>
-      </div>
+                                    </div>
       <ChevronRight className="h-5 w-5 shrink-0 opacity-75" />
     </button>
   );
@@ -437,8 +439,8 @@ function StatTile({
         {sublabel}
         {onClick && <ChevronRight className="h-3.5 w-3.5" />}
       </p>
-    </>
-  );
+                                      </>
+                                    );
 
   if (!onClick) {
     return (
@@ -628,22 +630,6 @@ export default function CommandDashboard() {
           <p className="text-sm text-muted-foreground">
             {currentUser?.firstName ? `Welcome, ${currentUser.firstName}.` : "Welcome."}
           </p>
-          <div className="flex items-center rounded-lg border border-border overflow-hidden text-sm mt-2">
-            <button
-              onClick={() => setPeriod("day")}
-              className={`px-4 py-1.5 font-medium transition-colors ${period === "day" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-              data-testid="toggle-period-day"
-            >
-              Today
-            </button>
-            <button
-              onClick={() => setPeriod("week")}
-              className={`px-4 py-1.5 font-medium transition-colors border-l border-border ${period === "week" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-              data-testid="toggle-period-week"
-            >
-              This Week
-            </button>
-          </div>
         </div>
 
         <PanicBanner
@@ -683,6 +669,14 @@ export default function CommandDashboard() {
 
         <div className="flex flex-col gap-3">
           <ActionTile
+            title="Panic"
+            subtitle="Worst-case emergency — send SOS immediately"
+            icon={Siren}
+            variant="panic"
+            onClick={() => setPanicOpen(true)}
+            testId="button-panic"
+          />
+          <ActionTile
             title="Start Live Incident"
             subtitle="Share GPS and navigate in real time"
             icon={Radio}
@@ -699,29 +693,35 @@ export default function CommandDashboard() {
             testId="button-report-incident"
           />
         </div>
-
-        <div className="flex flex-col items-center gap-1.5 py-2">
-          <button
-            onClick={() => setPanicOpen(true)}
-            data-testid="button-panic"
-            className="h-20 w-20 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 shadow-[0_0_0_4px_rgba(220,38,38,0.3)] hover:shadow-[0_0_0_6px_rgba(220,38,38,0.4)] transition-all duration-150 flex items-center justify-center touch-manipulation"
-            aria-label="Send panic alert"
-          >
-            <Siren className="h-9 w-9 text-white" />
-          </button>
-          <span className="text-[11px] font-bold tracking-widest text-red-600 dark:text-red-400 uppercase select-none">SOS</span>
-        </div>
       </div>
 
-      <div className="p-4 md:p-6 pt-1 pb-28 space-y-5 max-w-4xl mx-auto w-full">
+      <div className="p-4 md:p-6 pt-1 pb-28 space-y-4 max-w-4xl mx-auto w-full">
+        <div className="flex justify-center">
+          <div className="flex items-center rounded-lg border border-border overflow-hidden text-sm">
+            <button
+              onClick={() => setPeriod("day")}
+              className={`px-4 py-1.5 font-medium transition-colors ${period === "day" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+              data-testid="toggle-period-day"
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setPeriod("week")}
+              className={`px-4 py-1.5 font-medium transition-colors border-l border-border ${period === "week" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+              data-testid="toggle-period-week"
+            >
+              This Week
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {isLoading ? (
+              {isLoading ? (
             <>
               <Skeleton className="h-24 w-full rounded-xl" />
               <Skeleton className="h-24 w-full rounded-xl" />
             </>
-          ) : (
-            <>
+              ) : (
+                <>
               <StatTile
                 label={periodLabel}
                 value={data?.totalIncidents ?? 0}
@@ -741,10 +741,10 @@ export default function CommandDashboard() {
                 highlight={liveCountDisplay > 0}
                 testId="stat-live-count"
               />
-            </>
-          )}
+                </>
+              )}
         </div>
-      </div>
+              </div>
 
       <IncidentDialog open={logIncidentOpen} onOpenChange={setLogIncidentOpen} />
 
