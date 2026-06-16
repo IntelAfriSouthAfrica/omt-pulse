@@ -726,7 +726,7 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
 
             {/* Centre — online pill left of Intel logo (logo at true header centre) */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-              <ConnectivityBadge className="absolute right-full mr-1.5 shrink-0 pointer-events-auto" />
+              <ConnectivityBadge className="absolute right-full mr-4 shrink-0 pointer-events-auto -translate-x-1" />
               <img
                 src={intelafriLogo}
                 alt="IntelAfri"
@@ -735,8 +735,9 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               />
             </div>
 
-            {/* Right — billing, theme, notifications, avatar */}
-            <div className="flex items-center gap-1.5 justify-end text-foreground z-10 col-start-3">
+            {/* Right — action icons grouped, then avatar */}
+            <div className="flex items-center gap-2 justify-end text-foreground z-10 col-start-3">
+              <div className="flex items-center gap-0">
               {user.role === "administrator" && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -776,6 +777,7 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Notifications</TooltipContent>
               </Tooltip>
+              </div>
               <NotificationSheet
                 open={notifSheetOpen}
                 onOpenChange={setNotifSheetOpen}

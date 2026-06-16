@@ -44,7 +44,7 @@ import { IncidentSapsSection, isSapsFormField } from "./incident-saps-section";
 import { IncidentDescriptionSection } from "./incident-description-section";
 import { CalendarIcon, Clock, MapPin, Upload, Paperclip, X, Loader2, Camera, Mic, Square, Globe, Map, LocateFixed } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps-loader";
-import { quickPanicLocationCheck, hasPanicCoordinates, type PanicLocationResult } from "@/lib/panic-location";
+import { quickPanicLocationCheck, acquirePanicLocation, hasPanicCoordinates, panicLocationWarning, type PanicLocationResult } from "@/lib/panic-location";
 import { preloadLocationSettingsModule } from "@/lib/open-location-settings";
 import { OpenLocationSettingsButton } from "@/components/open-location-settings-button";
 import { AttachmentPreview, attachmentUploaderLabel } from "@/components/attachment-preview";
@@ -302,42 +302,50 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
       map.setCenter({ lat, lng });
       map.setZoom(14);
     }
-    // Reverse-geocode for a friendly place name. The geocoder is a standalone
-    // service and works even when the visual map isn't ready.
-    if (geocoderRef.current) {
-      setMapLoading(true);
-      geocoderRef.current.geocode({ location: { lat, lng } }, (results, status) => {
-        setMapLoading(false);
-        if (status === google.maps.GeocoderStatus.OK && results?.[0]) {
-          const address = results[0].formatted_address;
-          const placeName =
-            results[0].address_components?.find((component) =>
-              component.types.some((type) =>
-                [
-                  "street_address",
-                  "premise",
-                  "subpremise",
-                  "route",
-                  "point_of_interest",
-                  "establishment",
-                  "neighborhood",
-                  "sublocality",
-                  "locality",
-                  "administrative_area_level_3",
-                  "administrative_area_level_2",
-                ].includes(type)
-              )
-            )?.long_name ||
-            results[0].address_components?.find((component) => !/^[A-Z0-9]{4}\+[A-Z0-9]{2}$/i.test(component.long_name))?.long_name ||
-            address;
-          setPendingAddress(address);
-          form.setValue("locationName", placeName);
-          if (pinRef.current) pinRef.current.setTitle(placeName);
-        } else {
-          setPendingAddress(null);
+    // Reverse-geocode for a friendly place name. Lazy-init geocoder so inline
+    // "Use current location" works without opening the map modal first.
+    void (async () => {
+      try {
+        await loadGoogleMaps();
+        if (!geocoderRef.current) {
+          geocoderRef.current = new google.maps.Geocoder();
         }
-      });
-    }
+        setMapLoading(true);
+        geocoderRef.current.geocode({ location: { lat, lng } }, (results, status) => {
+          setMapLoading(false);
+          if (status === google.maps.GeocoderStatus.OK && results?.[0]) {
+            const address = results[0].formatted_address;
+            const placeName =
+              results[0].address_components?.find((component) =>
+                component.types.some((type) =>
+                  [
+                    "street_address",
+                    "premise",
+                    "subpremise",
+                    "route",
+                    "point_of_interest",
+                    "establishment",
+                    "neighborhood",
+                    "sublocality",
+                    "locality",
+                    "administrative_area_level_3",
+                    "administrative_area_level_2",
+                  ].includes(type)
+                )
+              )?.long_name ||
+              results[0].address_components?.find((component) => !/^[A-Z0-9]{4}\+[A-Z0-9]{2}$/i.test(component.long_name))?.long_name ||
+              address;
+            setPendingAddress(address);
+            form.setValue("locationName", placeName);
+            if (pinRef.current) pinRef.current.setTitle(placeName);
+          } else {
+            setPendingAddress(null);
+          }
+        });
+      } catch {
+        setMapLoading(false);
+      }
+    })();
   };
 
   const locationReady = locationProbe != null && hasPanicCoordinates(locationProbe);
@@ -378,6 +386,36 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   };
+
+  async function handleUseCurrentLocation() {
+    if (!navigator.geolocation) {
+      toast({
+        title: "Location unavailable",
+        description: "This device does not support GPS.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setGpsLoading(true);
+    try {
+      const loc = await acquirePanicLocation();
+      if (hasPanicCoordinates(loc)) {
+        applyGpsPosition(loc.lat, loc.lng);
+        toast({
+          title: "Location set",
+          description: "This incident will use your current GPS position.",
+        });
+      } else {
+        toast({
+          title: "Could not get location",
+          description: panicLocationWarning(loc.issue),
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setGpsLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!mapModalOpen) {
@@ -1026,19 +1064,38 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
 
                 {locationMode === "geographic" && (
                   <>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={openMapPicker}
-                      data-testid="button-toggle-map"
-                      className="gap-1.5 bg-red-700/90 hover:bg-red-800 text-white border-0"
-                    >
-                      <LocateFixed className="h-3.5 w-3.5" />
-                      {form.watch("latitude") && form.watch("longitude") ? "Change Location" : "Pick on Map"}
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleUseCurrentLocation()}
+                        disabled={gpsLoading}
+                        data-testid="button-use-current-location"
+                        className="gap-1.5 border-primary/45 text-primary hover:bg-primary/10 h-10"
+                      >
+                        {gpsLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <LocateFixed className="h-3.5 w-3.5" />
+                        )}
+                        Use current location
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={openMapPicker}
+                        disabled={gpsLoading}
+                        data-testid="button-toggle-map"
+                        className="gap-1.5 bg-red-700/90 hover:bg-red-800 text-white border-0 h-10"
+                      >
+                        <MapPin className="h-3.5 w-3.5" />
+                        {form.watch("latitude") && form.watch("longitude") ? "Change on map" : "Pick on map"}
+                      </Button>
+                    </div>
 
                     <p className="text-xs text-muted-foreground">
-                      Tap the map to place the pin, or choose a predefined site below.
+                      Use current location for a quick GPS fix, pick on the map to adjust, or choose a predefined site below.
                     </p>
 
                     <FormFieldComponent
@@ -1068,15 +1125,17 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
                       )}
                     />
 
-                    {form.watch("latitude") && form.watch("longitude") && (
-                      <p className="text-xs text-muted-foreground" data-testid="text-coordinates">
-                        Coordinates: {form.watch("latitude")?.toFixed(5)}, {form.watch("longitude")?.toFixed(5)}
-                      </p>
-                    )}
-                    {pendingAddress && (
-                      <p className="text-xs text-muted-foreground" data-testid="text-picked-address">
-                        {pendingAddress}
-                      </p>
+                    {form.watch("latitude") != null && form.watch("longitude") != null && (
+                      <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5 space-y-1" data-testid="banner-location-set">
+                        <p className="text-xs font-medium text-primary" data-testid="text-coordinates">
+                          GPS: {form.watch("latitude")?.toFixed(5)}, {form.watch("longitude")?.toFixed(5)}
+                        </p>
+                        {(pendingAddress || form.watch("locationName")) && (
+                          <p className="text-xs text-muted-foreground" data-testid="text-picked-address">
+                            {mapLoading ? "Finding nearest address…" : (pendingAddress ?? form.watch("locationName"))}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
