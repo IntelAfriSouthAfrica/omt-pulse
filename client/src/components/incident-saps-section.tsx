@@ -10,6 +10,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Shield } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const formTileClass = cn(
+  "flex flex-col items-center justify-center gap-2 rounded-xl border px-2 py-3.5 w-full",
+  "hover:border-primary/35 hover:bg-muted/35 active:scale-[0.98] transition-all touch-manipulation",
+  "min-h-[4.75rem]",
+);
 
 export type SapsCustomValues = Record<string, string | number | null | undefined>;
 
@@ -58,7 +65,7 @@ export function IncidentSapsSection({ fields, customFields, onChange }: Props) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <button
         type="button"
         onClick={() => {
@@ -66,21 +73,32 @@ export function IncidentSapsSection({ fields, customFields, onChange }: Props) {
           setOpen(next);
           if (!next) onChange(clearSapsFields(customFields, fields));
         }}
-        className={`w-full flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors touch-manipulation ${
+        className={cn(
+          formTileClass,
           open
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-border bg-background text-muted-foreground hover:bg-muted/40"
-        }`}
+            ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20 text-primary"
+            : "border-border/70 bg-card text-muted-foreground",
+        )}
         data-testid="toggle-saps-case"
       >
-        <Shield className="h-4 w-4 shrink-0" />
-        SAPS case
+        <span
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-full",
+            open ? "bg-primary/15 text-primary" : "bg-primary/10 text-primary",
+          )}
+        >
+          <Shield className="h-4 w-4 shrink-0" />
+        </span>
+        <span className="text-[11px] font-medium leading-tight text-center">SAPS case</span>
       </button>
 
       {open && (
-        <div className="rounded-xl border bg-muted/20 p-4 space-y-3" data-testid="section-saps-case">
-          <p className="text-sm font-semibold flex items-center gap-2">
-            <Shield className="h-4 w-4" />
+        <div
+          className="rounded-xl border border-border/70 bg-card/40 p-4 space-y-3 shadow-sm"
+          data-testid="section-saps-case"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <Shield className="h-3.5 w-3.5 text-primary/70" />
             SAPS case details
           </p>
           <div className="space-y-3">

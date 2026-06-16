@@ -1147,11 +1147,10 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
                         onClick={() => void handleUseCurrentLocation()}
                         disabled={gpsLoading}
                         data-testid="button-use-current-location"
-                        className="gap-1.5 border-primary/45 text-primary hover:bg-primary/10 h-10"
+                        className="gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground border-0 h-10"
                       >
                         {gpsLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1336,26 +1335,35 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
               onVehicleInvolvedChange={setVehicleInvolved}
             />
 
-            {sapsCustomFields.length > 0 && (
-              <IncidentSapsSection
-                fields={sapsCustomFields}
-                customFields={(form.watch("customFields") as Record<string, string | number | null>) || {}}
-                onChange={(next) => form.setValue("customFields", next)}
-              />
-            )}
-
-            {showDescription && (
-              <FormFieldComponent
-                control={form.control}
-                name="description"
-                render={({ field, fieldState }) => (
-                  <IncidentDescriptionSection
-                    value={field.value || ""}
-                    onChange={(v) => field.onChange(v)}
-                    error={fieldState.error?.message}
+            {(sapsCustomFields.length > 0 || showDescription) && (
+              <div
+                className={cn(
+                  "grid gap-2",
+                  sapsCustomFields.length > 0 && showDescription ? "grid-cols-2" : "grid-cols-1",
+                )}
+              >
+                {sapsCustomFields.length > 0 && (
+                  <IncidentSapsSection
+                    fields={sapsCustomFields}
+                    customFields={(form.watch("customFields") as Record<string, string | number | null>) || {}}
+                    onChange={(next) => form.setValue("customFields", next)}
                   />
                 )}
-              />
+
+                {showDescription && (
+                  <FormFieldComponent
+                    control={form.control}
+                    name="description"
+                    render={({ field, fieldState }) => (
+                      <IncidentDescriptionSection
+                        value={field.value || ""}
+                        onChange={(v) => field.onChange(v)}
+                        error={fieldState.error?.message}
+                      />
+                    )}
+                  />
+                )}
+              </div>
             )}
 
             {otherOrgCustomFields.length > 0 && (
