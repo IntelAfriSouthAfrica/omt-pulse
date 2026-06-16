@@ -1692,10 +1692,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrgPushSubscribedUserIds(orgId: string): Promise<Set<string>> {
-    const rows = await db.selectDistinct({ userId: pushSubscriptions.userId })
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.organizationId, orgId));
-    return new Set(rows.map(r => r.userId));
+    const [webRows, fcmRows] = await Promise.all([
+      db.selectDistinct({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.organizationId, orgId)),
+      db.selectDistinct({ userId: fcmTokens.userId })
+        .from(fcmTokens)
+        .where(eq(fcmTokens.organizationId, orgId)),
+    ]);
+    const ids = new Set<string>();
+    for (const r of webRows) ids.add(r.userId);
+    for (const r of fcmRows) ids.add(r.userId);
+    return ids;
   }
 
   // --- FCM Tokens ---
