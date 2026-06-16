@@ -252,8 +252,15 @@ function useCapacitorPush(userId: string | undefined) {
     const onVisible = () => {
       if (document.visibilityState === "visible") void runSync(false);
     };
+    const onOnline = () => {
+      void runSync(false);
+    };
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+    };
   }, [userId, runSync]);
 
   return { fcmState, enablePush, enabling };
@@ -709,11 +716,6 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
       <div className="flex h-screen w-full">
         <AppSidebar user={user} onLogout={() => logoutMutation.mutate()} avatarPreview={avatarPreview} />
         <div className="flex flex-col flex-1 min-w-0 relative">
-          {location !== "/dashboard" &&
-            location !== "/live-incident" &&
-            location !== "/live-severity" && (
-            <ConnectivityBadge className="absolute top-2 right-2 z-[60]" />
-          )}
           {/* Full INTEL header — dashboard only */}
           {location === "/dashboard" && (
           <header className="grid grid-cols-[1fr_auto_1fr] items-center p-2 border-b shrink-0 gap-2">
@@ -722,18 +724,19 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               <SidebarTrigger data-testid="button-sidebar-toggle" />
             </div>
 
-            {/* Centre — logo */}
-            <div className="flex items-center justify-center pointer-events-none select-none">
+            {/* Centre — online status + logo */}
+            <div className="flex items-center justify-center gap-2 min-w-0">
+              <ConnectivityBadge className="shrink-0" />
               <img
                 src={intelafriLogo}
                 alt="IntelAfri"
-                className="h-9 object-contain invert dark:invert-0"
+                className="h-9 object-contain invert dark:invert-0 shrink-0"
                 data-testid="img-header-logo"
               />
             </div>
 
-            {/* Right — billing, theme, notifications, avatar + connectivity */}
-            <div className="flex items-start gap-1.5 justify-end">
+            {/* Right — billing, theme, notifications, avatar */}
+            <div className="flex items-center gap-1 justify-end">
               {user.role === "administrator" && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -779,7 +782,6 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
                 onMarkAllRead={() => { markAllRead(); qc.invalidateQueries({ queryKey: ["/api/notifications"] }); setNotifLastSeen(Date.now()); }}
               />
 
-              <div className="flex flex-col items-center gap-1 shrink-0">
               {/* Avatar dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -829,8 +831,6 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <ConnectivityBadge />
-              </div>
               <input
                 ref={avatarInputRef}
                 type="file"

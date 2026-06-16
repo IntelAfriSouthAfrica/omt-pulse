@@ -86,14 +86,15 @@ export function consumePendingPushDeepLink(navigate: (path: string) => void): vo
 }
 
 /** True when the server already has an FCM token stored for this user. */
-export async function fetchFcmRegisteredOnServer(): Promise<boolean> {
+export async function fetchFcmRegisteredOnServer(): Promise<boolean | "unknown"> {
   try {
     const res = await fetch("/api/push/fcm-status", { credentials: "include" });
     if (!res.ok) return false;
     const body = await res.json();
     return !!body.registered;
   } catch {
-    return false;
+    // Network blip (e.g. data just restored) — don't treat as "no token on server".
+    return "unknown";
   }
 }
 
@@ -218,12 +219,18 @@ export async function syncNativePushIfNeeded(): Promise<NativePushStatus> {
   if (perm === "denied") return "denied";
   if (perm === "needs-enable") return "needs-enable";
 
+  const lastSynced = readLastSyncedToken();
+
+  // Data off: don't call FCM or show a false "not synced" if we synced before.
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    if (lastSynced) return "granted";
+    return "error";
+  }
+
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
     const serverRegistered = await fetchFcmRegisteredOnServer();
-    if (!serverRegistered) {
-      // Permission may be granted on-device while the server never received a token
-      // (failed POST, stale local cache, first login after install).
+    if (serverRegistered === false) {
       try {
         localStorage.removeItem(LAST_FCM_TOKEN_KEY);
       } catch {
@@ -232,7 +239,8 @@ export async function syncNativePushIfNeeded(): Promise<NativePushStatus> {
     }
     const token = await waitForFcmToken(PushNotifications);
     const changed = token !== readLastSyncedToken();
-    if (changed || !serverRegistered) {
+    const needsServerSync = serverRegistered === false || serverRegistered === "unknown";
+    if (changed || needsServerSync) {
       await registerNativePushToken(token);
       rememberSyncedToken(token);
     }
@@ -240,6 +248,8 @@ export async function syncNativePushIfNeeded(): Promise<NativePushStatus> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "denied") return "denied";
+    // Transient failure after airplane mode / slow mobile data — keep last good state.
+    if (lastSynced) return "granted";
     return "error";
   }
 }

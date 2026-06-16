@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus, BookOpen, Paperclip, Map as MapIcon, X, CalendarRange, Download, ArrowLeft, Radio, Siren } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { ConnectivityBadge } from "@/components/connectivity-badge";
 import { PanicBanner, type PanicAlert } from "@/components/panic-banner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -456,6 +457,7 @@ export default function OccurrenceBook() {
             <Plus className="h-4 w-4 mr-1.5" /> Report incident
           </Button>
         )}
+        {isReporter && <ConnectivityBadge className="shrink-0" />}
       </div>
       <div className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1">
 
