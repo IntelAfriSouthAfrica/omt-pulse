@@ -730,7 +730,7 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               <img
                 src={intelafriLogo}
                 alt="IntelAfri"
-                className="h-9 object-contain shrink-0 dark:mix-blend-screen"
+                className="h-9 object-contain shrink-0 mix-blend-screen"
                 data-testid="img-header-logo"
               />
             </div>
