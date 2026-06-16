@@ -200,7 +200,8 @@ export interface IStorage {
   // FCM Tokens (native push)
   upsertFcmToken(orgId: string, userId: string, token: string): Promise<void>;
   deleteFcmToken(token: string): Promise<void>;
-  getFcmTokensByOrg(orgId: string, excludeUserId?: string, roles?: string[]): Promise<Array<{ token: string; userId: string }>>;
+  getFcmTokensByOrg(orgId: string, excludeUserId?: string, roles?: string[], commandIds?: number[]): Promise<Array<{ token: string; userId: string }>>;
+  getUserIdsInCommands(orgId: string, commandIds: number[]): Promise<Set<string>>;
   getFcmTokensByUser(userId: string): Promise<Array<{ token: string }>>;
 
   countLiveIncidents(orgId: string): Promise<number>;
@@ -1732,17 +1733,33 @@ export class DatabaseStorage implements IStorage {
     await db.delete(fcmTokens).where(eq(fcmTokens.token, token));
   }
 
-  async getFcmTokensByOrg(orgId: string, excludeUserId?: string, roles?: string[]): Promise<Array<{ token: string; userId: string }>> {
+  async getFcmTokensByOrg(orgId: string, excludeUserId?: string, roles?: string[], commandIds?: number[]): Promise<Array<{ token: string; userId: string }>> {
     const conditions: ReturnType<typeof and>[] = [
       eq(fcmTokens.organizationId, orgId),
       eq(users.isActive, true),
     ];
     if (excludeUserId) conditions.push(ne(fcmTokens.userId, excludeUserId));
     if (roles && roles.length > 0) conditions.push(inArray(users.role, roles));
+    if (commandIds && commandIds.length > 0) {
+      const memberSubquery = db
+        .selectDistinct({ userId: commandUsers.userId })
+        .from(commandUsers)
+        .where(inArray(commandUsers.commandId, commandIds));
+      conditions.push(inArray(fcmTokens.userId, memberSubquery));
+    }
     return db.select({ token: fcmTokens.token, userId: fcmTokens.userId })
       .from(fcmTokens)
       .innerJoin(users, eq(fcmTokens.userId, users.id))
       .where(and(...conditions));
+  }
+
+  async getUserIdsInCommands(orgId: string, commandIds: number[]): Promise<Set<string>> {
+    if (commandIds.length === 0) return new Set();
+    const rows = await db
+      .selectDistinct({ userId: commandUsers.userId })
+      .from(commandUsers)
+      .where(and(eq(commandUsers.organizationId, orgId), inArray(commandUsers.commandId, commandIds)));
+    return new Set(rows.map((r) => r.userId));
   }
 
   async getFcmTokensByUser(userId: string): Promise<Array<{ token: string }>> {

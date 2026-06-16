@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-
-const formTileClass = cn(
-  "flex flex-col items-center justify-center gap-2 rounded-xl border px-2 py-3.5 w-full",
-  "hover:border-primary/35 hover:bg-muted/35 active:scale-[0.98] transition-all touch-manipulation",
-  "min-h-[4.75rem]",
-);
+import {
+  incidentOptionTileClass,
+  incidentOptionTileIconClass,
+  incidentOptionTileIconWrap,
+  incidentOptionTileLabelClass,
+  incidentOptionTileSubLabelClass,
+} from "@/components/incident-option-tile-styles";
 
 type Props = {
   value: string;
@@ -32,25 +32,15 @@ export function IncidentDescriptionSection({ value, onChange, error }: Props) {
           setOpen(next);
           if (!next) onChange(null);
         }}
-        className={cn(
-          formTileClass,
-          open
-            ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20 text-primary"
-            : "border-border/70 bg-card text-muted-foreground",
-        )}
+        className={incidentOptionTileClass(open)}
         data-testid="toggle-description"
       >
-        <span
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-full",
-            open ? "bg-primary/15 text-primary" : "bg-primary/10 text-primary",
-          )}
-        >
-          <FileText className="h-4 w-4 shrink-0" />
+        <span className={incidentOptionTileIconWrap(open)}>
+          <FileText className={incidentOptionTileIconClass} />
         </span>
-        <span className="text-[11px] font-medium leading-tight text-center">
+        <span className={incidentOptionTileLabelClass}>
           Description
-          <span className="block text-[10px] font-normal text-muted-foreground">optional</span>
+          <span className={incidentOptionTileSubLabelClass}>optional</span>
         </span>
       </button>
 

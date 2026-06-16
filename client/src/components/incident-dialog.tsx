@@ -42,6 +42,7 @@ import {
 } from "./incident-involvement-section";
 import { IncidentSapsSection, isSapsFormField } from "./incident-saps-section";
 import { IncidentDescriptionSection } from "./incident-description-section";
+import { incidentOptionTileGridClass } from "./incident-option-tile-styles";
 import { CalendarIcon, Clock, MapPin, Upload, Paperclip, X, Loader2, Camera, Mic, Square, Globe, Map, LocateFixed } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps-loader";
 import { quickPanicLocationCheck, acquirePanicLocation, hasPanicCoordinates, panicLocationWarning, type PanicLocationResult } from "@/lib/panic-location";
@@ -1338,8 +1339,8 @@ export function IncidentDialog({ open, onOpenChange, incident }: IncidentDialogP
             {(sapsCustomFields.length > 0 || showDescription) && (
               <div
                 className={cn(
-                  "grid gap-2",
-                  sapsCustomFields.length > 0 && showDescription ? "grid-cols-2" : "grid-cols-1",
+                  incidentOptionTileGridClass,
+                  !(sapsCustomFields.length > 0 && showDescription) && "grid-cols-1",
                 )}
               >
                 {sapsCustomFields.length > 0 && (

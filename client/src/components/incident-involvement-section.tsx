@@ -14,6 +14,15 @@ import { prepareAndUploadFile, UploadValidationError } from "@/lib/upload-media"
 import { useToast } from "@/hooks/use-toast";
 import { AttachmentPreview } from "@/components/attachment-preview";
 import { cn } from "@/lib/utils";
+import {
+  incidentOptionTileBase,
+  incidentOptionTileGridClass,
+  incidentOptionTileIconClass,
+  incidentOptionTileIconWrap,
+  incidentOptionTileLabelClass,
+  incidentOptionTileClass,
+  incidentOptionTileInactive,
+} from "@/components/incident-option-tile-styles";
 
 export const MAX_INVOLVEMENT_PERSONS = 3;
 export const MAX_INVOLVEMENT_VEHICLES = 3;
@@ -285,11 +294,7 @@ function labelFor(map: Record<string, string>, value: string) {
   return value ? (map[value] ?? value.replace(/_/g, " ")) : "";
 }
 
-const involvementTileClass = cn(
-  "flex flex-col items-center justify-center gap-2 rounded-xl border px-2 py-3.5",
-  "hover:border-primary/35 hover:bg-muted/35 active:scale-[0.98] transition-all touch-manipulation",
-  "disabled:opacity-50 disabled:pointer-events-none min-h-[4.75rem]",
-);
+const involvementTileClass = cn(incidentOptionTileBase, incidentOptionTileInactive);
 
 function InvolvementFieldCard({
   label,
@@ -603,24 +608,24 @@ function InvolvementPhotoPicker({
           disabled={uploading || urls.length >= MAX_INVOLVEMENT_PHOTOS}
           onClick={() => cameraInputRef.current?.click()}
           data-testid={`${testIdPrefix}-take-photo`}
-          className={involvementTileClass}
+          className={cn(involvementTileClass, "disabled:opacity-50 disabled:pointer-events-none")}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+          <span className={incidentOptionTileIconWrap(false)}>
+            {uploading ? <Loader2 className={cn(incidentOptionTileIconClass, "animate-spin")} /> : <Camera className={incidentOptionTileIconClass} />}
           </span>
-          <span className="text-[11px] font-medium leading-tight text-center">Photo</span>
+          <span className={incidentOptionTileLabelClass}>Photo</span>
         </button>
         <button
           type="button"
           disabled={uploading || urls.length >= MAX_INVOLVEMENT_PHOTOS}
           onClick={() => fileInputRef.current?.click()}
           data-testid={`${testIdPrefix}-upload-photo`}
-          className={involvementTileClass}
+          className={cn(involvementTileClass, "disabled:opacity-50 disabled:pointer-events-none")}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          <span className={incidentOptionTileIconWrap(false)}>
+            {uploading ? <Loader2 className={cn(incidentOptionTileIconClass, "animate-spin")} /> : <Upload className={incidentOptionTileIconClass} />}
           </span>
-          <span className="text-[11px] font-medium leading-tight text-center">Upload</span>
+          <span className={incidentOptionTileLabelClass}>Upload</span>
         </button>
       </div>
       <InvolvementPhotoGrid
@@ -941,7 +946,7 @@ export function IncidentInvolvementSection({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2">
+      <div className={incidentOptionTileGridClass}>
         <button
           type="button"
           onClick={() => {
@@ -954,23 +959,13 @@ export function IncidentInvolvementSection({
               onChange(clearPersonFields(customFields));
             }
           }}
-          className={cn(
-            involvementTileClass,
-            personInvolved
-              ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20 text-primary"
-              : "border-border/70 bg-card text-muted-foreground",
-          )}
+          className={incidentOptionTileClass(personInvolved)}
           data-testid="toggle-person-involved"
         >
-          <span
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-full",
-              personInvolved ? "bg-primary/15 text-primary" : "bg-primary/10 text-primary",
-            )}
-          >
-            <User className="h-4 w-4 shrink-0" />
+          <span className={incidentOptionTileIconWrap(personInvolved)}>
+            <User className={incidentOptionTileIconClass} />
           </span>
-          <span className="text-[11px] font-medium leading-tight text-center">Person</span>
+          <span className={incidentOptionTileLabelClass}>Person</span>
         </button>
         <button
           type="button"
@@ -984,23 +979,13 @@ export function IncidentInvolvementSection({
               onChange(clearVehicleFields(customFields));
             }
           }}
-          className={cn(
-            involvementTileClass,
-            vehicleInvolved
-              ? "border-primary/50 bg-primary/10 ring-1 ring-primary/20 text-primary"
-              : "border-border/70 bg-card text-muted-foreground",
-          )}
+          className={incidentOptionTileClass(vehicleInvolved)}
           data-testid="toggle-vehicle-involved"
         >
-          <span
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-full",
-              vehicleInvolved ? "bg-primary/15 text-primary" : "bg-primary/10 text-primary",
-            )}
-          >
-            <Car className="h-4 w-4 shrink-0" />
+          <span className={incidentOptionTileIconWrap(vehicleInvolved)}>
+            <Car className={incidentOptionTileIconClass} />
           </span>
-          <span className="text-[11px] font-medium leading-tight text-center">Vehicle</span>
+          <span className={incidentOptionTileLabelClass}>Vehicle</span>
         </button>
       </div>
 

@@ -290,6 +290,145 @@ async function dispatchLiveIncidentPush(orgId: string, triggerUserId: string, in
   })();
 }
 
+const DISPATCH_STAFF_ROLES = ["administrator", "supervisor"] as const;
+
+function reportIncidentSeverityEmoji(severity: string | null | undefined, isOther: boolean): string {
+  if (isOther) return "📋";
+  if (severity === "red") return "🔴";
+  if (severity === "orange") return "🟠";
+  if (severity === "yellow") return "🟡";
+  return "📋";
+}
+
+/** Notify administrators and supervisors when a standard (non-live) incident is filed. */
+async function dispatchReportIncidentPush(orgId: string, triggerUserId: string, incident: Incident) {
+  if (incident.isLive) return;
+
+  const commandIds = incident.commandId != null ? [incident.commandId] : undefined;
+  const subs = await storage.getPushSubscriptionsByOrg(
+    orgId,
+    triggerUserId,
+    [...DISPATCH_STAFF_ROLES],
+    commandIds,
+  );
+
+  const reporter = await storage.getUserById(triggerUserId);
+  const fullName = reporter ? `${reporter.firstName} ${reporter.lastName}`.trim() : "A user";
+
+  let catName: string | null = null;
+  let catSeverity: string | null = null;
+  let catIsOther = false;
+  if (incident.categoryId) {
+    const cat = await storage.getCategory(incident.categoryId, orgId);
+    catName = cat?.name ?? null;
+    catSeverity = cat?.severity ?? null;
+    catIsOther = !!cat?.isOther;
+  }
+
+  const effectiveSeverity = incident.severity && incident.severity !== "none"
+    ? incident.severity
+    : catSeverity;
+  const emoji = reportIncidentSeverityEmoji(effectiveSeverity, catIsOther);
+  const typeLabel = catName ?? (catIsOther && incident.otherCategoryNote?.trim()
+    ? incident.otherCategoryNote.trim()
+    : "Incident reported");
+  const title = `${emoji} New Report — ${fullName}`;
+  const locPart = incident.locationName?.trim()
+    || (incident.latitude != null && incident.longitude != null
+      ? `${Number(incident.latitude).toFixed(4)}, ${Number(incident.longitude).toFixed(4)}`
+      : null);
+  const bodyParts = [typeLabel, `${incident.incidentDate} ${incident.incidentTime}`];
+  if (locPart) bodyParts.push(locPart);
+  const body = `${bodyParts.join(" · ")} · Tap to review`;
+
+  const detailUrl = `/occurrence-book?incident=${incident.id}`;
+  const payload = JSON.stringify({
+    type: "incident_reported",
+    title,
+    body,
+    incidentId: incident.id,
+    url: detailUrl,
+  });
+
+  const pushedUserIds = new Set<string>();
+
+  if (subs.length > 0) {
+    await Promise.allSettled(
+      dedupeByEndpoint(subs).map(async (sub) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            payload,
+            URGENT_PUSH,
+          );
+          pushedUserIds.add(sub.userId);
+          storage.createNotificationLog({
+            organizationId: orgId,
+            userId: sub.userId,
+            title,
+            body,
+            url: detailUrl,
+            incidentId: incident.id,
+          }).catch(() => {});
+        } catch (err: unknown) {
+          const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+            ? (err as { statusCode: number }).statusCode
+            : 0;
+
+          if (statusCode === 410 || statusCode === 404) {
+            await storage.deletePushSubscription(sub.endpoint);
+          } else {
+            console.error("[push] report incident notify failed (status=%d):", statusCode, err instanceof Error ? err.message : err);
+          }
+        }
+      }),
+    );
+  }
+
+  storage.getFcmTokensByOrg(orgId, triggerUserId, [...DISPATCH_STAFF_ROLES], commandIds).then((fcmSubs) => {
+    if (fcmSubs.length === 0) return;
+    sendFcmBatch(fcmSubs.map((s) => s.token), {
+      title,
+      body,
+      data: {
+        type: "incident_reported",
+        incidentId: String(incident.id),
+        url: detailUrl,
+      },
+      notificationTag: `report-${incident.id}`,
+    }).catch(() => {});
+    for (const s of fcmSubs) pushedUserIds.add(s.userId);
+  }).catch(() => {});
+
+  (async () => {
+    try {
+      const allActive = await storage.getActiveUsersByOrg(orgId);
+      const commandMemberIds = commandIds
+        ? await storage.getUserIdsInCommands(orgId, commandIds)
+        : null;
+      const noPushUsers = allActive.filter(
+        (u) =>
+          u.id !== triggerUserId &&
+          (u.role === "administrator" || u.role === "supervisor") &&
+          !pushedUserIds.has(u.id) &&
+          (!commandMemberIds || commandMemberIds.has(u.id)),
+      );
+      await Promise.allSettled(
+        noPushUsers.map((u) =>
+          storage.createNotificationLog({
+            organizationId: orgId,
+            userId: u.id,
+            title,
+            body,
+            url: detailUrl,
+            incidentId: incident.id,
+          }).catch(() => {}),
+        ),
+      );
+    } catch { /* best-effort */ }
+  })();
+}
+
 /** Replace stale live-incident FCM alerts on native devices when an incident closes. */
 async function dispatchLiveIncidentCloseFcm(
   orgId: string,
@@ -2597,6 +2736,10 @@ export async function registerRoutes(
     audit(userId, orgId, "incident.create", `Created incident on ${parsed.data.incidentDate}`, { entityType: "incident", entityId: String(incident.id) });
     if (incident.isLive) {
       dispatchLiveIncidentPush(orgId, userId, incident).catch((e) => console.error("[push] dispatch error:", e));
+    } else {
+      dispatchReportIncidentPush(orgId, userId, incident).catch((e) => console.error("[push] report incident dispatch error:", e));
+    }
+    if (incident.isLive) {
       // Retry push after 2 minutes — catches devices that had the first push
       // dropped due to brief offline windows, battery optimisation, or TTL expiry.
       // Only fires once per incident and only if the incident is still live.
