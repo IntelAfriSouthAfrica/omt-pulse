@@ -693,7 +693,7 @@ export default function CommandDashboard() {
           />
           <ActionTile
             title="Report Incident"
-            subtitle="Log an occurrence to the book"
+            subtitle="Report what happened"
             icon={ClipboardList}
             variant="primary"
             onClick={() => setLogIncidentOpen(true)}
