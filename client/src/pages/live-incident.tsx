@@ -12,7 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Navigation, MapPin, Radio, CheckCircle2, Loader2, Search, RotateCcw, RotateCw, ChevronRight, ExternalLink, Camera, ImageIcon, X, WifiOff, LogOut, Mic, Square, AlertTriangle, HelpCircle, Gauge, ArrowUp, ArrowUpRight, ArrowUpLeft, ArrowRight, CornerUpRight, CornerUpLeft, Merge, Users, Layers, MessageCircle } from "lucide-react";
+import { ArrowLeft, Navigation, MapPin, Radio, CheckCircle2, Loader2, Search, RotateCcw, RotateCw, ChevronRight, ExternalLink, Camera, ImageIcon, X, WifiOff, LogOut, Mic, Square, AlertTriangle, HelpCircle, Gauge, ArrowUp, ArrowUpRight, ArrowUpLeft, ArrowRight, CornerUpRight, CornerUpLeft, Merge, Users, Layers, MessageCircle, Route } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { usePermissionStatus } from "@/hooks/use-permission-status";
@@ -662,6 +663,9 @@ export default function LiveIncidentPage() {
   const liveNavTarget = currentIncident && isJoinerMode
     ? resolveLiveNavTarget(currentIncident)
     : null;
+  /** Joiner has not yet picked Direct vs Guided — keep map and turn-by-turn hidden. */
+  const joinerChoosingNav =
+    isJoinerMode && !!joinerNavDestination && !navMode && !navStarted;
 
   // Screen Wake Lock — keep the screen on for the full duration of any live
   // incident (creator or joiner). Released automatically when the incident ends
@@ -2139,6 +2143,13 @@ export default function LiveIncidentPage() {
 
   useEffect(() => { activeNavStyleRef.current = activeNavStyle; }, [activeNavStyle]);
 
+  // Stale guided route from a prior session must not show before the joiner picks a mode.
+  useEffect(() => {
+    if (!joinerChoosingNav) return;
+    void clearGuidedRouteVisuals();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joinerChoosingNav, currentIncident?.id]);
+
   useEffect(() => {
     if (!navMode) return;
     startStepTracking();
@@ -3594,6 +3605,22 @@ export default function LiveIncidentPage() {
                 }
               />
             )}
+            {!navMode && isJoinerMode && navRosterOthersCount > 0 && (
+              <button
+                type="button"
+                className="w-full flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors shrink-0"
+                onClick={() => setRespondersSheetOpen(true)}
+                data-testid="button-joiner-view-responders"
+              >
+                <span className="flex items-center gap-2 font-medium">
+                  <Users className="h-4 w-4 text-primary" />
+                  {navRosterOthersCount === 1
+                    ? navRespondersChipLabel()
+                    : `${navRosterOthersCount} people responding`}
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
+            )}
             {/* Destination — hidden in nav mode so the map fills the screen */}
             {!navMode && (
             <div className="space-y-1.5 shrink-0">
@@ -3601,9 +3628,10 @@ export default function LiveIncidentPage() {
                 /* Joiner: show a navigate button to the creator's saved destination */
                 !navMode && joinerNavDestination ? (
                   <div className="space-y-1.5">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destination</p>
                     {navStarted ? (
-                      <button
+                      <>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destination</p>
+                        <button
                         type="button"
                         className="w-full min-w-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors py-1 text-left flex items-center gap-1.5"
                         onClick={() => confirmAndOpenNav(
@@ -3615,64 +3643,64 @@ export default function LiveIncidentPage() {
                         <Navigation className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">Open in Google Maps (pauses GPS) — {joinerNavDestination.name}</span>
                       </button>
+                      </>
                     ) : (
-                      <>
-                        <p className="text-xs text-muted-foreground truncate px-0.5">{joinerNavDestination.name}</p>
-                        {liveNavTarget && userLoc && (
-                          <p className="text-xs text-muted-foreground px-0.5">
-                            {fmtDist(Math.round(haversineM(userLoc, liveNavTarget)))} straight · {bearingCardinal(bearingDegrees(userLoc, liveNavTarget))}
-                          </p>
-                        )}
-                        <Button
-                          size="lg"
-                          className="w-full flex-col h-auto py-3 gap-1 bg-blue-600 hover:bg-blue-700 text-white"
-                          onClick={() => void dispatchJoinerInApp("direct")}
-                          disabled={acquiringJoinerGps}
-                          data-testid="button-joiner-navigate-direct"
-                        >
-                          <div className="flex items-center gap-2">
-                            {acquiringJoinerGps ? (
-                              <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
-                            ) : (
-                              <Navigation className="h-5 w-5 shrink-0" />
-                            )}
-                            <span className="text-base font-semibold">
-                              {acquiringJoinerGps ? "Getting your location…" : "Direct — I know the way"}
-                            </span>
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Destination</p>
+                          <p className="text-sm font-medium text-foreground truncate px-0.5">{joinerNavDestination.name}</p>
+                        </div>
+                        <div className="space-y-3">
+                          <h3 className="text-base font-semibold text-foreground text-center">
+                            How do you want to respond?
+                          </h3>
+                          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => void dispatchJoinerInApp("direct")}
+                              disabled={acquiringJoinerGps}
+                              className={cn(
+                                "flex flex-col items-start gap-2 rounded-xl border-2 p-4 text-left transition-colors",
+                                "border-primary/50 bg-primary/5 shadow-sm hover:bg-primary/10 active:bg-primary/15",
+                                acquiringJoinerGps && "opacity-60 pointer-events-none",
+                              )}
+                              data-testid="button-joiner-navigate-direct"
+                            >
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/15 text-primary">
+                                {acquiringJoinerGps ? (
+                                  <Loader2 className="h-5 w-5 animate-spin" />
+                                ) : (
+                                  <Navigation className="h-5 w-5" />
+                                )}
+                              </span>
+                              <span className="text-base font-semibold text-foreground">
+                                {acquiringJoinerGps ? "Getting your location…" : "I know the way"}
+                              </span>
+                              <span className="text-sm text-muted-foreground leading-snug">
+                                Use my own route / shortcuts
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void dispatchJoinerInApp("guided")}
+                              disabled={acquiringJoinerGps}
+                              className={cn(
+                                "flex flex-col items-start gap-2 rounded-xl border-2 border-border bg-card p-4 text-left transition-colors",
+                                "hover:bg-muted/40 active:bg-muted/60",
+                                acquiringJoinerGps && "opacity-60 pointer-events-none",
+                              )}
+                              data-testid="button-joiner-navigate-guided"
+                            >
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground">
+                                <Route className="h-5 w-5" />
+                              </span>
+                              <span className="text-base font-semibold text-foreground">Need directions</span>
+                              <span className="text-sm text-muted-foreground leading-snug">
+                                Turn-by-turn with voice guidance
+                              </span>
+                            </button>
                           </div>
-                          <span className="text-xs font-normal opacity-80 px-2">
-                            Distance & bearing · take your own route
-                          </span>
-                        </Button>
-                        <Button
-                          size="lg"
-                          variant="outline"
-                          className="w-full flex-col h-auto py-2.5 gap-0.5"
-                          onClick={() => void dispatchJoinerInApp("guided")}
-                          disabled={acquiringJoinerGps}
-                          data-testid="button-joiner-navigate-guided"
-                        >
-                          <span className="text-sm font-semibold">Guided — turn-by-turn</span>
-                          <span className="text-xs font-normal text-muted-foreground px-2">
-                            Google route with voice prompts
-                          </span>
-                        </Button>
-                        {navRosterOthersCount > 0 && (
-                          <button
-                            type="button"
-                            className="w-full flex items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm hover:bg-muted/70 transition-colors"
-                            onClick={() => setRespondersSheetOpen(true)}
-                            data-testid="button-joiner-view-responders"
-                          >
-                            <span className="flex items-center gap-2 font-medium">
-                              <Users className="h-4 w-4 text-primary" />
-                              {navRosterOthersCount === 1
-                                ? navRespondersChipLabel()
-                                : `${navRosterOthersCount} people responding`}
-                            </span>
-                            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                          </button>
-                        )}
+                        </div>
                         {joinerGpsBlocked && (
                           <div className="pt-1" data-testid="banner-joiner-location-off">
                             <LocationPermissionGuide
@@ -3688,9 +3716,9 @@ export default function LiveIncidentPage() {
                             />
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
-                    {routeInfo && activeNavStyle === "guided" && (
+                    {routeInfo && activeNavStyle === "guided" && !joinerChoosingNav && (
                       <div className="flex gap-3 text-sm pt-0.5">
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <Navigation className="h-3.5 w-3.5" />
@@ -3778,7 +3806,7 @@ export default function LiveIncidentPage() {
             </div>
             )}
 
-            {!navMode && hasRoute && currentStep ? (
+            {!navMode && !joinerChoosingNav && hasRoute && currentStep && !isJoinerMode ? (
               <div className="rounded-lg border border-green-500/40 bg-green-500/5 px-4 py-3 space-y-2 shrink-0" data-testid="nav-panel">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-base leading-snug flex-1 pr-2" data-testid="text-step-instruction">
@@ -3897,7 +3925,7 @@ export default function LiveIncidentPage() {
         )}
 
         {/* Responder status pill — non-nav mode only; nav mode shows the chip in the overlay */}
-        {!navMode && navResponders.length > 0 && (
+        {!navMode && !joinerChoosingNav && navResponders.length > 0 && (
           <div className="flex items-center gap-1.5 px-1 shrink-0 text-xs font-medium text-green-700 dark:text-green-400" data-testid="chip-responders-nonav">
             <Users className="h-3.5 w-3.5 shrink-0" />
             <span>
@@ -3910,6 +3938,7 @@ export default function LiveIncidentPage() {
         )}
 
         {/* Map always mounted — avoids losing the google.maps.Map instance on state change */}
+        <div className={joinerChoosingNav ? "hidden" : undefined}>
         {isNative && (jsApiDegraded || jsApiRetrying) && !mapsError && (
           <div
             className="shrink-0 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-950 dark:text-amber-100 space-y-2"
@@ -4302,6 +4331,7 @@ export default function LiveIncidentPage() {
             )}
           </div>
         )}
+        </div>
 
         {/* Bottom action area */}
         {currentIncident ? (
