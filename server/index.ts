@@ -233,6 +233,11 @@ app.use((req, res, next) => {
   await safeMigrate("tracker_devices.command_idx", sql`
     CREATE INDEX IF NOT EXISTS tracker_devices_command_idx ON tracker_devices (command_id)
   `);
+  await safeMigrate("tracker_devices.vehicle_make", sql`ALTER TABLE tracker_devices ADD COLUMN IF NOT EXISTS vehicle_make TEXT`);
+  await safeMigrate("tracker_devices.vehicle_model", sql`ALTER TABLE tracker_devices ADD COLUMN IF NOT EXISTS vehicle_model TEXT`);
+  await safeMigrate("tracker_devices.vehicle_registration", sql`ALTER TABLE tracker_devices ADD COLUMN IF NOT EXISTS vehicle_registration TEXT`);
+  await safeMigrate("tracker_devices.assigned_user_id", sql`ALTER TABLE tracker_devices ADD COLUMN IF NOT EXISTS assigned_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL`);
+  await safeMigrate("tracker_devices.notes", sql`ALTER TABLE tracker_devices ADD COLUMN IF NOT EXISTS notes TEXT`);
 
   await safeMigrate("incident_evidence_notes.create", sql`
     CREATE TABLE IF NOT EXISTS incident_evidence_notes (

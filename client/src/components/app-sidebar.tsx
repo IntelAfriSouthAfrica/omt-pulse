@@ -1,4 +1,4 @@
-import { BookOpen, Settings, BarChart3, LogOut, Users, Upload, Bell, Radio, LayoutDashboard, MessageSquare, Shield, Network } from "lucide-react";
+import { BookOpen, Settings, BarChart3, LogOut, Users, Upload, Bell, Radio, LayoutDashboard, MessageSquare, Shield, Network, Car } from "lucide-react";
 import { useState, useEffect } from "react";
 import africaLogo from "../assets/africa-logo.png";
 import { useLocation, Link } from "wouter";
@@ -141,6 +141,7 @@ function CommandSwitcher() {
       queryClient.invalidateQueries({ queryKey: ["/api/form-fields"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trackers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/custom-maps"] });
       queryClient.invalidateQueries({ queryKey: ["/api/commands/visibility-grants"] });
       queryClient.invalidateQueries({ queryKey: ["/api/commands/visibility-requests"] });
@@ -205,6 +206,7 @@ function getNavItems(role: string, isSuperadmin: boolean) {
   if (role === "administrator" || role === "supervisor") {
     items.push({ title: "Analytics", url: "/analytics", icon: BarChart3 });
     items.push({ title: "Live Monitor", url: "/live-monitor", icon: Radio });
+    items.push({ title: "Fleet", url: "/fleet", icon: Car });
   }
   if (role === "reporter") {
     items.push({ title: "Live Incident", url: "/live-incident", icon: Radio });

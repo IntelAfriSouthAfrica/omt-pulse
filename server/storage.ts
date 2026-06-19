@@ -19,12 +19,19 @@ import {
   users, organizations, locations, incidentCategories, incidents, formFields, userLocationAssignments, incidentAttachments, incidentEvidenceNotes, auditLogs, customMaps, importBatches, pushSubscriptions, notificationLogs, liveResponders, chatMessages, chatReads, panicAcknowledgers, fcmTokens,
   commands, commandUsers, commandVisibilityGrants, commandVisibilityRequests,
   trackerDevices,
+  trackerPositions,
 } from "@shared/schema";
 
 export type TrackerDeviceSummary = {
   id: number;
   imei: string;
   label: string | null;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
+  vehicleRegistration: string | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  notes: string | null;
   commandId: number | null;
   commandName: string | null;
   lastLat: number | null;
@@ -32,9 +39,22 @@ export type TrackerDeviceSummary = {
   lastSpeedKph: number | null;
   lastHeading: number | null;
   lastIgnitionOn: boolean | null;
+  lastMileageKm: number | null;
   lastGpsValid: boolean | null;
   lastPositionAt: string | null;
   lastSeenAt: string | null;
+};
+
+export type TrackerPositionSummary = {
+  id: number;
+  latitude: number;
+  longitude: number;
+  speedKph: number | null;
+  heading: number | null;
+  ignitionOn: boolean | null;
+  mileageKm: number | null;
+  gpsValid: boolean;
+  recordedAt: string;
 };
 
 export type LiveResponderSummary = {
@@ -243,6 +263,25 @@ export interface IStorage {
   markThreadRead(orgId: string, userId: string, recipientId: string | null): Promise<void>;
 
   getTrackerDevices(orgId: string, commandFilter?: number[]): Promise<TrackerDeviceSummary[]>;
+  getTrackerDeviceById(id: number, orgId: string): Promise<TrackerDeviceSummary | undefined>;
+  updateTrackerDevice(
+    id: number,
+    orgId: string,
+    patch: {
+      label?: string | null;
+      vehicleMake?: string | null;
+      vehicleModel?: string | null;
+      vehicleRegistration?: string | null;
+      assignedUserId?: string | null;
+      commandId?: number | null;
+      notes?: string | null;
+    },
+  ): Promise<TrackerDeviceSummary | undefined>;
+  getTrackerPositionHistory(
+    deviceId: number,
+    orgId: string,
+    opts?: { limit?: number; since?: Date },
+  ): Promise<TrackerPositionSummary[]>;
 
   // Dashboard
   getDashboardSummary(orgId: string, period: 'day' | 'week', restrictToLocationIds?: number[], commandFilter?: number[], restrictToUserId?: string): Promise<{
@@ -1975,37 +2014,43 @@ export class DatabaseStorage implements IStorage {
   }
 
   // --- Vehicle trackers (GT06 / fleet) ---
-  async getTrackerDevices(orgId: string, commandFilter?: number[]): Promise<TrackerDeviceSummary[]> {
-    const conditions = [eq(trackerDevices.organizationId, orgId)];
-    if (commandFilter && commandFilter.length > 0) {
-      conditions.push(inArray(trackerDevices.commandId, commandFilter));
-    }
-
-    const rows = await db
-      .select({
-        id: trackerDevices.id,
-        imei: trackerDevices.imei,
-        label: trackerDevices.label,
-        commandId: trackerDevices.commandId,
-        commandName: commands.name,
-        lastLat: trackerDevices.lastLat,
-        lastLng: trackerDevices.lastLng,
-        lastSpeedKph: trackerDevices.lastSpeedKph,
-        lastHeading: trackerDevices.lastHeading,
-        lastIgnitionOn: trackerDevices.lastIgnitionOn,
-        lastGpsValid: trackerDevices.lastGpsValid,
-        lastPositionAt: trackerDevices.lastPositionAt,
-        lastSeenAt: trackerDevices.lastSeenAt,
-      })
-      .from(trackerDevices)
-      .leftJoin(commands, eq(trackerDevices.commandId, commands.id))
-      .where(and(...conditions))
-      .orderBy(desc(trackerDevices.lastSeenAt));
-
-    return rows.map((r) => ({
+  private mapTrackerDeviceRow(r: {
+    id: number;
+    imei: string;
+    label: string | null;
+    vehicleMake: string | null;
+    vehicleModel: string | null;
+    vehicleRegistration: string | null;
+    assignedUserId: string | null;
+    assignedFirstName: string | null;
+    assignedLastName: string | null;
+    notes: string | null;
+    commandId: number | null;
+    commandName: string | null;
+    lastLat: number | null;
+    lastLng: number | null;
+    lastSpeedKph: number | null;
+    lastHeading: number | null;
+    lastIgnitionOn: boolean | null;
+    lastMileageKm: number | null;
+    lastGpsValid: boolean | null;
+    lastPositionAt: Date | null;
+    lastSeenAt: Date | null;
+  }): TrackerDeviceSummary {
+    const assignedUserName =
+      r.assignedFirstName || r.assignedLastName
+        ? `${r.assignedFirstName ?? ""} ${r.assignedLastName ?? ""}`.trim()
+        : null;
+    return {
       id: r.id,
       imei: r.imei,
       label: r.label,
+      vehicleMake: r.vehicleMake,
+      vehicleModel: r.vehicleModel,
+      vehicleRegistration: r.vehicleRegistration,
+      assignedUserId: r.assignedUserId,
+      assignedUserName: assignedUserName || null,
+      notes: r.notes,
       commandId: r.commandId,
       commandName: r.commandName,
       lastLat: r.lastLat,
@@ -2013,9 +2058,133 @@ export class DatabaseStorage implements IStorage {
       lastSpeedKph: r.lastSpeedKph,
       lastHeading: r.lastHeading,
       lastIgnitionOn: r.lastIgnitionOn,
+      lastMileageKm: r.lastMileageKm,
       lastGpsValid: r.lastGpsValid,
       lastPositionAt: r.lastPositionAt?.toISOString() ?? null,
       lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+    };
+  }
+
+  private trackerDeviceSelectFields() {
+    return {
+      id: trackerDevices.id,
+      imei: trackerDevices.imei,
+      label: trackerDevices.label,
+      vehicleMake: trackerDevices.vehicleMake,
+      vehicleModel: trackerDevices.vehicleModel,
+      vehicleRegistration: trackerDevices.vehicleRegistration,
+      assignedUserId: trackerDevices.assignedUserId,
+      assignedFirstName: users.firstName,
+      assignedLastName: users.lastName,
+      notes: trackerDevices.notes,
+      commandId: trackerDevices.commandId,
+      commandName: commands.name,
+      lastLat: trackerDevices.lastLat,
+      lastLng: trackerDevices.lastLng,
+      lastSpeedKph: trackerDevices.lastSpeedKph,
+      lastHeading: trackerDevices.lastHeading,
+      lastIgnitionOn: trackerDevices.lastIgnitionOn,
+      lastMileageKm: trackerDevices.lastMileageKm,
+      lastGpsValid: trackerDevices.lastGpsValid,
+      lastPositionAt: trackerDevices.lastPositionAt,
+      lastSeenAt: trackerDevices.lastSeenAt,
+    };
+  }
+
+  async getTrackerDevices(orgId: string, commandFilter?: number[]): Promise<TrackerDeviceSummary[]> {
+    const conditions = [eq(trackerDevices.organizationId, orgId)];
+    if (commandFilter && commandFilter.length > 0) {
+      conditions.push(inArray(trackerDevices.commandId, commandFilter));
+    }
+
+    const rows = await db
+      .select(this.trackerDeviceSelectFields())
+      .from(trackerDevices)
+      .leftJoin(commands, eq(trackerDevices.commandId, commands.id))
+      .leftJoin(users, eq(trackerDevices.assignedUserId, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(trackerDevices.lastSeenAt));
+
+    return rows.map((r) => this.mapTrackerDeviceRow(r));
+  }
+
+  async getTrackerDeviceById(id: number, orgId: string): Promise<TrackerDeviceSummary | undefined> {
+    const rows = await db
+      .select(this.trackerDeviceSelectFields())
+      .from(trackerDevices)
+      .leftJoin(commands, eq(trackerDevices.commandId, commands.id))
+      .leftJoin(users, eq(trackerDevices.assignedUserId, users.id))
+      .where(and(eq(trackerDevices.id, id), eq(trackerDevices.organizationId, orgId)))
+      .limit(1);
+    const row = rows[0];
+    return row ? this.mapTrackerDeviceRow(row) : undefined;
+  }
+
+  async updateTrackerDevice(
+    id: number,
+    orgId: string,
+    patch: {
+      label?: string | null;
+      vehicleMake?: string | null;
+      vehicleModel?: string | null;
+      vehicleRegistration?: string | null;
+      assignedUserId?: string | null;
+      commandId?: number | null;
+      notes?: string | null;
+    },
+  ): Promise<TrackerDeviceSummary | undefined> {
+    const existing = await this.getTrackerDeviceById(id, orgId);
+    if (!existing) return undefined;
+
+    await db
+      .update(trackerDevices)
+      .set(patch)
+      .where(and(eq(trackerDevices.id, id), eq(trackerDevices.organizationId, orgId)));
+
+    return this.getTrackerDeviceById(id, orgId);
+  }
+
+  async getTrackerPositionHistory(
+    deviceId: number,
+    orgId: string,
+    opts?: { limit?: number; since?: Date },
+  ): Promise<TrackerPositionSummary[]> {
+    const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 2000);
+    const conditions = [
+      eq(trackerPositions.deviceId, deviceId),
+      eq(trackerPositions.organizationId, orgId),
+    ];
+    if (opts?.since) {
+      conditions.push(gte(trackerPositions.recordedAt, opts.since));
+    }
+
+    const rows = await db
+      .select({
+        id: trackerPositions.id,
+        latitude: trackerPositions.latitude,
+        longitude: trackerPositions.longitude,
+        speedKph: trackerPositions.speedKph,
+        heading: trackerPositions.heading,
+        ignitionOn: trackerPositions.ignitionOn,
+        mileageKm: trackerPositions.mileageKm,
+        gpsValid: trackerPositions.gpsValid,
+        recordedAt: trackerPositions.recordedAt,
+      })
+      .from(trackerPositions)
+      .where(and(...conditions))
+      .orderBy(desc(trackerPositions.recordedAt))
+      .limit(limit);
+
+    return rows.map((r) => ({
+      id: r.id,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      speedKph: r.speedKph,
+      heading: r.heading,
+      ignitionOn: r.ignitionOn,
+      mileageKm: r.mileageKm,
+      gpsValid: r.gpsValid,
+      recordedAt: r.recordedAt.toISOString(),
     }));
   }
 
