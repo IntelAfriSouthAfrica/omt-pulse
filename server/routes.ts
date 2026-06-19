@@ -3720,6 +3720,112 @@ export async function registerRoutes(
     res.json(devices);
   });
 
+  app.get("/api/trackers/assignees", async (req, res) => {
+    const { organizationId: orgId, role } = req.currentUser!;
+    if (role !== "administrator" && role !== "supervisor") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const users = await storage.getUsersByOrg(orgId);
+    res.json(
+      users
+        .filter((u) => u.isActive)
+        .map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, role: u.role })),
+    );
+  });
+
+  app.get("/api/trackers/:id", async (req, res) => {
+    const { organizationId: orgId, role } = req.currentUser!;
+    if (role !== "administrator" && role !== "supervisor") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const device = await storage.getTrackerDeviceById(id, orgId);
+    if (!device) return res.status(404).json({ message: "Not found" });
+    const { commandFilter } = await getCommandScope(req);
+    if (commandFilter && device.commandId != null && !commandFilter.includes(device.commandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    res.json(device);
+  });
+
+  app.patch("/api/trackers/:id", async (req, res) => {
+    const { organizationId: orgId, role } = req.currentUser!;
+    if (role !== "administrator" && role !== "supervisor") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const existing = await storage.getTrackerDeviceById(id, orgId);
+    if (!existing) return res.status(404).json({ message: "Not found" });
+    const { commandFilter, writeAccessCommandIds } = await getCommandScope(req);
+    if (commandFilter && existing.commandId != null && !commandFilter.includes(existing.commandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const body = req.body as Record<string, unknown>;
+    const patch: Parameters<typeof storage.updateTrackerDevice>[2] = {};
+    if ("label" in body) patch.label = typeof body.label === "string" ? body.label.trim() || null : null;
+    if ("vehicleMake" in body) patch.vehicleMake = typeof body.vehicleMake === "string" ? body.vehicleMake.trim() || null : null;
+    if ("vehicleModel" in body) patch.vehicleModel = typeof body.vehicleModel === "string" ? body.vehicleModel.trim() || null : null;
+    if ("vehicleRegistration" in body) {
+      patch.vehicleRegistration = typeof body.vehicleRegistration === "string" ? body.vehicleRegistration.trim() || null : null;
+    }
+    if ("assignedUserId" in body) {
+      patch.assignedUserId = typeof body.assignedUserId === "string" ? body.assignedUserId || null : null;
+    }
+    if ("notes" in body) patch.notes = typeof body.notes === "string" ? body.notes.trim() || null : null;
+    if ("commandId" in body) {
+      const cmdId = body.commandId === null ? null : Number(body.commandId);
+      if (cmdId !== null && !Number.isFinite(cmdId)) {
+        return res.status(400).json({ message: "Invalid commandId" });
+      }
+      if (cmdId !== null && writeAccessCommandIds && !writeAccessCommandIds.includes(cmdId)) {
+        return res.status(403).json({ message: "Cannot assign to that group" });
+      }
+      patch.commandId = cmdId;
+    }
+
+    const updated = await storage.updateTrackerDevice(id, orgId, patch);
+    res.json(updated);
+  });
+
+  app.get("/api/trackers/:id/positions", async (req, res) => {
+    const { organizationId: orgId, role } = req.currentUser!;
+    if (role !== "administrator" && role !== "supervisor") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+    const device = await storage.getTrackerDeviceById(id, orgId);
+    if (!device) return res.status(404).json({ message: "Not found" });
+    const { commandFilter } = await getCommandScope(req);
+    if (commandFilter && device.commandId != null && !commandFilter.includes(device.commandId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const hours = parseInt(String(req.query.hours ?? "24"), 10);
+    const limit = parseInt(String(req.query.limit ?? "200"), 10);
+    const since =
+      Number.isFinite(hours) && hours > 0
+        ? new Date(Date.now() - hours * 60 * 60 * 1000)
+        : undefined;
+
+    const positions = await storage.getTrackerPositionHistory(id, orgId, {
+      limit: Number.isFinite(limit) ? limit : 200,
+      since,
+    });
+
+    const maxSpeedKph = positions.reduce((max, p) => Math.max(max, p.speedKph ?? 0), 0);
+    res.json({
+      deviceId: id,
+      hours: Number.isFinite(hours) ? hours : null,
+      count: positions.length,
+      maxSpeedKph: maxSpeedKph > 0 ? maxSpeedKph : null,
+      positions,
+    });
+  });
+
   // Stats
   app.get("/api/stats", async (req, res) => {
     const { organizationId: orgId, role, id: userId } = req.currentUser!;

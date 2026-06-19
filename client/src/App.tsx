@@ -32,6 +32,7 @@ import LiveSeverityPage from "@/pages/live-severity";
 import LiveMonitorPage from "@/pages/live-monitor";
 import CommandDashboard from "@/pages/command-dashboard";
 import CommandsPage from "@/pages/commands";
+import FleetPage from "@/pages/fleet";
 import VisibilityPage from "@/pages/visibility";
 import ArchonDashboard from "@/pages/archon-dashboard";
 import ArchonLoginPage from "@/pages/archon-login";
@@ -934,6 +935,11 @@ function AuthenticatedApp({ user }: { user: AuthUser }) {
               <Route path="/live-monitor">
                 <RoleGuard role={user.role} allowed={["administrator", "supervisor"]}>
                   <LiveMonitorPage />
+                </RoleGuard>
+              </Route>
+              <Route path="/fleet">
+                <RoleGuard role={user.role} allowed={["administrator", "supervisor"]}>
+                  <FleetPage />
                 </RoleGuard>
               </Route>
               <Route path="/commands">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Location } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,7 +19,9 @@ import {
   CheckCircle2,
   Shield,
   Car,
+  ChevronDown,
 } from "lucide-react";
+import { Link } from "wouter";
 
 type Period = "day" | "week";
 
@@ -49,6 +51,12 @@ export type TrackerDeviceSummary = {
   id: number;
   imei: string;
   label: string | null;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
+  vehicleRegistration: string | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  notes: string | null;
   commandId: number | null;
   commandName: string | null;
   lastLat: number | null;
@@ -56,6 +64,7 @@ export type TrackerDeviceSummary = {
   lastSpeedKph: number | null;
   lastHeading: number | null;
   lastIgnitionOn: boolean | null;
+  lastMileageKm: number | null;
   lastGpsValid: boolean | null;
   lastPositionAt: string | null;
   lastSeenAt: string | null;
@@ -124,7 +133,73 @@ function hasTrackerMapPosition(device: TrackerDeviceSummary): boolean {
 }
 
 function trackerDisplayName(device: TrackerDeviceSummary): string {
+  const makeModel = [device.vehicleMake, device.vehicleModel].filter(Boolean).join(" ").trim();
+  if (makeModel) return makeModel;
   return device.label?.trim() || `Vehicle …${device.imei.slice(-4)}`;
+}
+
+function OpsCollapsibleSection({
+  title,
+  icon: Icon,
+  accentClass,
+  borderClass,
+  count,
+  open,
+  onToggle,
+  headerExtra,
+  manageHref,
+  testId,
+  children,
+}: {
+  title: string;
+  icon: typeof Users;
+  accentClass: string;
+  borderClass: string;
+  count?: string;
+  open: boolean;
+  onToggle: () => void;
+  headerExtra?: ReactNode;
+  manageHref?: string;
+  testId: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "flex flex-col min-h-0",
+        open && "flex-1",
+        borderClass || "border-b border-slate-800/80",
+      )}
+      data-testid={testId}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "shrink-0 w-full px-3 py-2.5 flex items-center gap-2 text-left transition-colors hover:bg-slate-800/40",
+          accentClass,
+        )}
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0 opacity-90" />
+        <span className="text-[10px] font-bold uppercase tracking-[0.14em] flex-1">{title}</span>
+        {count != null && <span className="text-[10px] text-slate-500 tabular-nums">{count}</span>}
+        {manageHref && (
+          <Link
+            href={manageHref}
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] text-blue-400 hover:underline px-1"
+          >
+            Manage
+          </Link>
+        )}
+        <ChevronDown
+          className={cn("h-4 w-4 text-slate-500 transition-transform shrink-0", open && "rotate-180")}
+        />
+      </button>
+      {headerExtra}
+      {open && <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>}
+    </section>
+  );
 }
 
 function formatLastSeen(ts: string | Date | null | undefined): string {
@@ -263,6 +338,8 @@ export function OperationsDashboard({
 }: Props) {
   const [highlightId, setHighlightId] = useState<number | null>(null);
   const [highlightTrackerId, setHighlightTrackerId] = useState<number | null>(null);
+  const [teamPanelOpen, setTeamPanelOpen] = useState(false);
+  const [fleetPanelOpen, setFleetPanelOpen] = useState(true);
   const [responderFilter, setResponderFilter] = useState<ResponderFilter>("all");
   const [clock, setClock] = useState(() => new Date());
   const [lastRefresh, setLastRefresh] = useState(() => new Date());
@@ -710,107 +787,22 @@ export function OperationsDashboard({
           />
         </div>
 
-        {/* Right: team + fleet */}
+        {/* Right: fleet + team */}
         <div
-          className="w-[24%] min-w-[200px] max-w-xs flex flex-col border-l border-slate-800/80 bg-[#131a22]"
-          data-testid="ops-team-panel"
+          className="w-[24%] min-w-[200px] max-w-xs flex flex-col min-h-0 border-l border-slate-800/80 bg-[#131a22]"
+          data-testid="ops-side-panel"
         >
-          <div className="flex flex-col flex-1 min-h-0">
-          <div className="shrink-0 px-3 py-2 border-b border-slate-800/80">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Team</p>
-            <div className="flex gap-1 mt-2">
-              {(["all", "responding", "available"] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setResponderFilter(f)}
-                  className={cn(
-                    "flex-1 rounded px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
-                    responderFilter === f
-                      ? "bg-emerald-700/80 text-white"
-                      : "bg-slate-800 text-slate-500 hover:text-slate-300",
-                  )}
-                  data-testid={`ops-filter-${f}`}
-                >
-                  {f === "all" ? "All" : f === "responding" ? "Active" : "Avail"}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto ops-scroll">
-            {kpiLoading ? (
-              <div className="p-3 space-y-2">
-                <Skeleton className="h-12 bg-slate-800" />
-                <Skeleton className="h-12 bg-slate-800" />
-                <Skeleton className="h-12 bg-slate-800" />
-              </div>
-            ) : filteredTeam.length === 0 ? (
-              <p className="text-xs text-slate-600 text-center py-8 px-3">No team members match this filter.</p>
-            ) : (
-              <ul className="divide-y divide-slate-800/80">
-                {filteredTeam.map((user) => {
-                  const status = responderStatus(user);
-                  const statusLabel =
-                    status === "responding" ? "Responding" : status === "available" ? "Available" : "Off duty";
-                  const statusColor =
-                    status === "responding"
-                      ? "text-orange-400 bg-orange-950/50 border-orange-800/50"
-                      : status === "available"
-                        ? "text-emerald-400 bg-emerald-950/40 border-emerald-800/40"
-                        : "text-slate-500 bg-slate-800/50 border-slate-700/50";
-
-                  return (
-                    <li key={user.id} className="px-3 py-2.5 hover:bg-slate-800/40">
-                      <div className="flex items-start gap-2">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-bold text-slate-200">
-                          {user.firstName.charAt(0)}
-                          {user.lastName.charAt(0)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-slate-200 truncate">
-                            {user.firstName} {user.lastName}
-                          </p>
-                          <p className="text-[10px] text-slate-500 capitalize">{user.role}</p>
-                          <span
-                            className={cn(
-                              "inline-flex mt-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                              statusColor,
-                            )}
-                          >
-                            {statusLabel}
-                          </span>
-                          <p className="text-[10px] text-slate-500 mt-1.5 leading-snug truncate">
-                            {getUserPresenceHint(user, liveIncidents, locations)}
-                          </p>
-                          {user.isLive && (
-                            <button
-                              type="button"
-                              className="block mt-1 text-[10px] text-emerald-500 hover:underline"
-                              onClick={() => user.liveIncidentId && onOpenLiveMonitor(user.liveIncidentId)}
-                            >
-                              View incident →
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-          </div>
-
-          <div
-            className="shrink-0 flex flex-col border-t border-slate-800/80 max-h-[38%] min-h-0"
-            data-testid="ops-fleet-panel"
+          <OpsCollapsibleSection
+            title="Fleet"
+            icon={Car}
+            accentClass="bg-blue-950/30 border-b border-blue-900/40"
+            borderClass="border-blue-900/20"
+            count={`${liveTrackers.length}/${trackers.length}`}
+            open={fleetPanelOpen}
+            onToggle={() => setFleetPanelOpen((v) => !v)}
+            manageHref="/fleet"
+            testId="ops-fleet-panel"
           >
-            <div className="shrink-0 px-3 py-2 border-b border-slate-800/80 flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Fleet</p>
-              <span className="text-[10px] text-slate-500 tabular-nums">
-                {liveTrackers.length}/{trackers.length}
-              </span>
-            </div>
             <div className="flex-1 overflow-y-auto ops-scroll">
               {trackersLoading ? (
                 <div className="p-3 space-y-2">
@@ -819,7 +811,7 @@ export function OperationsDashboard({
               ) : trackers.length === 0 ? (
                 <p className="text-xs text-slate-600 text-center py-6 px-3">No GPS trackers linked.</p>
               ) : (
-                <ul className="divide-y divide-slate-800/80">
+                <ul className="divide-y divide-blue-900/20">
                   {trackers.map((device) => {
                     const live = hasTrackerMapPosition(device);
                     const name = trackerDisplayName(device);
@@ -827,6 +819,8 @@ export function OperationsDashboard({
                     const speed =
                       device.lastSpeedKph != null ? `${Math.round(device.lastSpeedKph)} km/h` : null;
                     const seen = device.lastSeenAt ? formatGpsAge(device.lastSeenAt) : null;
+                    const reg = device.vehicleRegistration?.trim();
+                    const assignee = device.assignedUserName?.trim();
 
                     return (
                       <li key={device.id}>
@@ -839,8 +833,8 @@ export function OperationsDashboard({
                           }}
                           className={cn(
                             "w-full text-left px-3 py-2.5 transition-colors",
-                            live ? "hover:bg-slate-800/50" : "opacity-60",
-                            isHighlighted && "bg-slate-800/70 ring-1 ring-inset ring-blue-500/40",
+                            live ? "hover:bg-blue-950/30" : "opacity-60",
+                            isHighlighted && "bg-blue-950/50 ring-1 ring-inset ring-blue-500/40",
                           )}
                           data-testid={`ops-fleet-row-${device.id}`}
                         >
@@ -850,7 +844,12 @@ export function OperationsDashboard({
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-slate-200 truncate">{name}</p>
-                              <p className="text-[10px] text-slate-500 truncate">…{device.imei.slice(-6)}</p>
+                              <p className="text-[10px] text-slate-500 truncate">
+                                {reg || `…${device.imei.slice(-6)}`}
+                              </p>
+                              {assignee && (
+                                <p className="text-[10px] text-blue-300/80 truncate mt-0.5">{assignee}</p>
+                              )}
                               <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                 <span
                                   className={cn(
@@ -873,13 +872,115 @@ export function OperationsDashboard({
                             </div>
                           </div>
                         </button>
+                        <Link
+                          href={`/fleet?device=${device.id}`}
+                          className="block px-3 pb-2 text-[10px] text-blue-400/90 hover:underline"
+                        >
+                          History & details →
+                        </Link>
                       </li>
                     );
                   })}
                 </ul>
               )}
             </div>
-          </div>
+          </OpsCollapsibleSection>
+
+          <OpsCollapsibleSection
+            title="Team"
+            icon={Users}
+            accentClass="bg-emerald-950/25 border-b border-emerald-900/30"
+            borderClass=""
+            count={String(teamUsers.length)}
+            open={teamPanelOpen}
+            onToggle={() => setTeamPanelOpen((v) => !v)}
+            testId="ops-team-panel"
+            headerExtra={
+              teamPanelOpen ? (
+                <div className="shrink-0 px-3 pb-2 flex gap-1">
+                  {(["all", "responding", "available"] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setResponderFilter(f)}
+                      className={cn(
+                        "flex-1 rounded px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+                        responderFilter === f
+                          ? "bg-emerald-700/80 text-white"
+                          : "bg-slate-800 text-slate-500 hover:text-slate-300",
+                      )}
+                      data-testid={`ops-filter-${f}`}
+                    >
+                      {f === "all" ? "All" : f === "responding" ? "Active" : "Avail"}
+                    </button>
+                  ))}
+                </div>
+              ) : null
+            }
+          >
+            <div className="flex-1 overflow-y-auto ops-scroll">
+              {kpiLoading ? (
+                <div className="p-3 space-y-2">
+                  <Skeleton className="h-12 bg-slate-800" />
+                  <Skeleton className="h-12 bg-slate-800" />
+                  <Skeleton className="h-12 bg-slate-800" />
+                </div>
+              ) : filteredTeam.length === 0 ? (
+                <p className="text-xs text-slate-600 text-center py-8 px-3">No team members match this filter.</p>
+              ) : (
+                <ul className="divide-y divide-emerald-900/15">
+                  {filteredTeam.map((user) => {
+                    const status = responderStatus(user);
+                    const statusLabel =
+                      status === "responding" ? "Responding" : status === "available" ? "Available" : "Off duty";
+                    const statusColor =
+                      status === "responding"
+                        ? "text-orange-400 bg-orange-950/50 border-orange-800/50"
+                        : status === "available"
+                          ? "text-emerald-400 bg-emerald-950/40 border-emerald-800/40"
+                          : "text-slate-500 bg-slate-800/50 border-slate-700/50";
+
+                    return (
+                      <li key={user.id} className="px-3 py-2.5 hover:bg-emerald-950/20">
+                        <div className="flex items-start gap-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-950/40 border border-emerald-800/30 text-xs font-bold text-emerald-200">
+                            {user.firstName.charAt(0)}
+                            {user.lastName.charAt(0)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-slate-200 truncate">
+                              {user.firstName} {user.lastName}
+                            </p>
+                            <p className="text-[10px] text-slate-500 capitalize">{user.role}</p>
+                            <span
+                              className={cn(
+                                "inline-flex mt-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                                statusColor,
+                              )}
+                            >
+                              {statusLabel}
+                            </span>
+                            <p className="text-[10px] text-slate-500 mt-1.5 leading-snug truncate">
+                              {getUserPresenceHint(user, liveIncidents, locations)}
+                            </p>
+                            {user.isLive && (
+                              <button
+                                type="button"
+                                className="block mt-1 text-[10px] text-emerald-500 hover:underline"
+                                onClick={() => user.liveIncidentId && onOpenLiveMonitor(user.liveIncidentId)}
+                              >
+                                View incident →
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </OpsCollapsibleSection>
         </div>
       </div>
     </div>
