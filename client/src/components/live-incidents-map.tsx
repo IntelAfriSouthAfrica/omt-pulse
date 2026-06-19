@@ -274,6 +274,15 @@ export function LiveIncidentsMap({
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const trafficLayerRef = useRef<google.maps.TrafficLayer | null>(null);
   const lastFitSignatureRef = useRef<string>("");
+  /** After the user pans/zooms, do not auto-reset the viewport on poll ticks. */
+  const userViewportLockedRef = useRef(false);
+  const initialCenterRef = useRef(initialCenter);
+  const initialZoomRef = useRef(initialZoom);
+
+  useEffect(() => {
+    initialCenterRef.current = initialCenter;
+    initialZoomRef.current = initialZoom;
+  }, [initialCenter, initialZoom]);
 
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsError, setMapsError] = useState(false);
@@ -314,6 +323,12 @@ export function LiveIncidentsMap({
     });
     mapInstanceRef.current = map;
     infoWindowRef.current = new google.maps.InfoWindow();
+    map.addListener("dragstart", () => {
+      userViewportLockedRef.current = true;
+    });
+    map.addListener("zoom_changed", () => {
+      userViewportLockedRef.current = true;
+    });
     return () => {
       markersRef.current.forEach((m) => m.setMap(null));
       markersRef.current.clear();
@@ -716,6 +731,7 @@ export function LiveIncidentsMap({
         .join(",");
       if (signature !== lastFitSignatureRef.current) {
         lastFitSignatureRef.current = signature;
+        userViewportLockedRef.current = false;
         try {
           map.fitBounds(bounds, 60);
           const listener = google.maps.event.addListenerOnce(map, "bounds_changed", () => {
@@ -726,12 +742,14 @@ export function LiveIncidentsMap({
           /* ignore */
         }
       }
-    } else if (incidents.length === 0) {
-      lastFitSignatureRef.current = "";
-      map.setCenter(initialCenter);
-      map.setZoom(initialZoom);
+    } else if (incidents.length === 0 && !userViewportLockedRef.current) {
+      if (lastFitSignatureRef.current !== "__empty__") {
+        lastFitSignatureRef.current = "__empty__";
+        map.setCenter(initialCenterRef.current);
+        map.setZoom(initialZoomRef.current);
+      }
     }
-  }, [incidents, mapsReady, onIncidentMarkerClick, initialCenter, initialZoom]);
+  }, [incidents, mapsReady, onIncidentMarkerClick]);
 
   useEffect(() => {
     if (highlightId == null) return;
@@ -745,9 +763,10 @@ export function LiveIncidentsMap({
   const resetToDefaultView = () => {
     const map = mapInstanceRef.current;
     if (!map) return;
-    lastFitSignatureRef.current = "";
-    map.setCenter(initialCenter);
-    map.setZoom(initialZoom);
+    userViewportLockedRef.current = false;
+    lastFitSignatureRef.current = "__empty__";
+    map.setCenter(initialCenterRef.current);
+    map.setZoom(initialZoomRef.current);
   };
 
   const controlBtnClass = (active: boolean) =>

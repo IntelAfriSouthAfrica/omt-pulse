@@ -594,7 +594,6 @@ export function OperationsDashboard({
             className="absolute inset-0"
             testId="map-ops-dashboard"
             darkTheme
-            initialCenter={{ lat: SA_MAP_DEFAULT.lat, lng: SA_MAP_DEFAULT.lng }}
             initialZoom={SA_MAP_DEFAULT.zoom}
             showMapControls
           />
