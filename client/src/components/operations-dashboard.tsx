@@ -22,6 +22,16 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Link } from "wouter";
+import {
+  getVehicleMotionStatus,
+  getFreshnessTier,
+  formatFreshnessAgo,
+  freshnessClassDark,
+  MOTION_STATUS,
+  isTrackerOnline,
+  vehicleDisplayName,
+  ignitionLabel,
+} from "@/lib/fleet-intelligence";
 
 type Period = "day" | "week";
 
@@ -77,8 +87,6 @@ type LiveQueueItem = LiveIncidentMapItem & {
 type ResponderFilter = "all" | "responding" | "available";
 
 const ONLINE_WINDOW_MS = 30 * 60 * 1000;
-const TRACKER_ACTIVE_MS = 30 * 60 * 1000;
-
 function severityBadgeClass(severity: string | null): string {
   if (severity === "red") return "bg-red-500/20 text-red-300 border-red-500/40";
   if (severity === "orange") return "bg-orange-500/20 text-orange-300 border-orange-500/40";
@@ -122,20 +130,12 @@ function hasMapPosition(user: DashboardUserSummary): boolean {
   return true;
 }
 
-function isTrackerLive(device: TrackerDeviceSummary): boolean {
-  if (!device.lastSeenAt) return false;
-  return Date.now() - new Date(device.lastSeenAt).getTime() < TRACKER_ACTIVE_MS;
-}
-
-function hasTrackerMapPosition(device: TrackerDeviceSummary): boolean {
-  if (device.lastLat == null || device.lastLng == null) return false;
-  return isTrackerLive(device);
-}
-
 function trackerDisplayName(device: TrackerDeviceSummary): string {
-  const makeModel = [device.vehicleMake, device.vehicleModel].filter(Boolean).join(" ").trim();
-  if (makeModel) return makeModel;
-  return device.label?.trim() || `Vehicle …${device.imei.slice(-4)}`;
+  return vehicleDisplayName(device);
+}
+
+function hasTrackerCoordinates(device: TrackerDeviceSummary): boolean {
+  return device.lastLat != null && device.lastLng != null;
 }
 
 function OpsCollapsibleSection({
@@ -452,38 +452,58 @@ export function OperationsDashboard({
   }, [teamUsers]);
 
   const liveTrackers = useMemo(
-    () => trackers.filter(hasTrackerMapPosition),
+    () => trackers.filter((t) => isTrackerOnline(t.lastSeenAt) && hasTrackerCoordinates(t)),
+    [trackers],
+  );
+
+  const movingCount = useMemo(
+    () =>
+      trackers.filter(
+        (t) => getVehicleMotionStatus(t.lastSeenAt, t.lastSpeedKph) === "moving",
+      ).length,
     [trackers],
   );
 
   const trackerMapMarkers = useMemo((): TrackerMapMarker[] => {
-    return liveTrackers.map((t) => ({
-      id: t.id,
-      label: trackerDisplayName(t),
-      imei: t.imei,
-      lat: t.lastLat!,
-      lng: t.lastLng!,
-      speedKph: t.lastSpeedKph,
-      heading: t.lastHeading,
-      ignitionOn: t.lastIgnitionOn,
-      lastPositionAt: t.lastPositionAt,
-      lastSeenAt: t.lastSeenAt,
-    }));
-  }, [liveTrackers]);
+    return trackers
+      .filter(hasTrackerCoordinates)
+      .map((t) => ({
+        id: t.id,
+        label: trackerDisplayName(t),
+        imei: t.imei,
+        lat: t.lastLat!,
+        lng: t.lastLng!,
+        speedKph: t.lastSpeedKph,
+        heading: t.lastHeading,
+        ignitionOn: t.lastIgnitionOn,
+        lastPositionAt: t.lastPositionAt,
+        lastSeenAt: t.lastSeenAt,
+        driverName: t.assignedUserName,
+        registration: t.vehicleRegistration,
+        motionStatus: getVehicleMotionStatus(t.lastSeenAt, t.lastSpeedKph),
+      }));
+  }, [trackers]);
 
   const vehiclesKpiHint = useMemo(() => {
     if (trackers.length === 0) return "no devices registered";
+    if (movingCount > 0) return `${movingCount} moving now`;
     if (liveTrackers.length === 0) {
       const latest = trackers.find((t) => t.lastSeenAt);
       if (latest?.lastSeenAt) {
         const age = formatGpsAge(latest.lastSeenAt);
-        return age ? `last seen ${age}` : "awaiting GPS";
+        return age ? `last signal ${age}` : "awaiting GPS";
       }
       return "awaiting GPS";
     }
-    if (liveTrackers.length === 1) return "1 vehicle live";
-    return `${liveTrackers.length} vehicles live`;
-  }, [trackers, liveTrackers]);
+    if (liveTrackers.length === 1) return "1 unit online";
+    return `${liveTrackers.length} units online`;
+  }, [trackers, liveTrackers, movingCount]);
+
+  const fleetHeaderCount = useMemo(() => {
+    if (movingCount > 0) return `${movingCount} moving`;
+    if (liveTrackers.length > 0) return `${liveTrackers.length}/${trackers.length} live`;
+    return `${trackers.length} units`;
+  }, [movingCount, liveTrackers.length, trackers.length]);
 
   return (
     <div
@@ -797,7 +817,7 @@ export function OperationsDashboard({
             icon={Car}
             accentClass="bg-blue-950/30"
             borderClass="border-blue-900/25"
-            count={`${liveTrackers.length}/${trackers.length}`}
+            count={fleetHeaderCount}
             open={fleetPanelOpen}
             onToggle={() => setFleetPanelOpen((v) => !v)}
             manageHref="/fleet"
@@ -813,12 +833,15 @@ export function OperationsDashboard({
               ) : (
                 <ul className="divide-y divide-blue-900/20">
                   {trackers.map((device) => {
-                    const live = hasTrackerMapPosition(device);
+                    const motion = getVehicleMotionStatus(device.lastSeenAt, device.lastSpeedKph);
+                    const motionCfg = MOTION_STATUS[motion];
+                    const online = isTrackerOnline(device.lastSeenAt);
+                    const hasCoords = hasTrackerCoordinates(device);
                     const name = trackerDisplayName(device);
                     const isHighlighted = highlightTrackerId === device.id;
                     const speed =
-                      device.lastSpeedKph != null ? `${Math.round(device.lastSpeedKph)} km/h` : null;
-                    const seen = device.lastSeenAt ? formatGpsAge(device.lastSeenAt) : null;
+                      device.lastSpeedKph != null ? Math.round(device.lastSpeedKph) : null;
+                    const freshness = getFreshnessTier(device.lastSeenAt);
                     const reg = device.vehicleRegistration?.trim();
                     const assignee = device.assignedUserName?.trim();
 
@@ -826,58 +849,109 @@ export function OperationsDashboard({
                       <li key={device.id}>
                         <button
                           type="button"
-                          disabled={!live}
+                          disabled={!hasCoords}
                           onClick={() => {
+                            setFleetPanelOpen(true);
                             setHighlightTrackerId(device.id);
                             setHighlightId(null);
                           }}
                           className={cn(
-                            "w-full text-left px-3 py-2.5 transition-colors",
-                            live ? "hover:bg-blue-950/30" : "opacity-60",
-                            isHighlighted && "bg-blue-950/50 ring-1 ring-inset ring-blue-500/40",
+                            "w-full text-left px-3 py-3 transition-colors border-l-2",
+                            hasCoords ? "hover:bg-blue-950/35" : "opacity-50 cursor-not-allowed",
+                            isHighlighted
+                              ? "bg-blue-950/55 border-l-blue-400"
+                              : "border-l-transparent",
+                            motion === "moving" && !isHighlighted && "bg-emerald-950/10",
                           )}
                           data-testid={`ops-fleet-row-${device.id}`}
                         >
-                          <div className="flex items-start gap-2">
-                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-950/60 border border-blue-800/40">
-                              <Car className="h-3.5 w-3.5 text-blue-400" />
+                          <div className="flex items-start gap-2.5">
+                            <div
+                              className={cn(
+                                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
+                                motion === "moving"
+                                  ? "bg-emerald-950/50 border-emerald-700/40"
+                                  : motion === "idle"
+                                    ? "bg-amber-950/40 border-amber-800/40"
+                                    : "bg-slate-800/60 border-slate-700/50",
+                              )}
+                            >
+                              <Car
+                                className={cn(
+                                  "h-4 w-4",
+                                  motion === "moving"
+                                    ? "text-emerald-400"
+                                    : motion === "idle"
+                                      ? "text-amber-400"
+                                      : "text-slate-500",
+                                )}
+                              />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium text-slate-200 truncate">{name}</p>
-                              <p className="text-[10px] text-slate-500 truncate">
-                                {reg || `…${device.imei.slice(-6)}`}
-                              </p>
-                              {assignee && (
-                                <p className="text-[10px] text-blue-300/80 truncate mt-0.5">{assignee}</p>
-                              )}
-                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                              <div className="flex items-start justify-between gap-1">
+                                <p className="text-sm font-semibold text-slate-100 truncate leading-tight">
+                                  {name}
+                                </p>
                                 <span
                                   className={cn(
-                                    "inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                                    live
-                                      ? "text-blue-300 bg-blue-950/50 border-blue-800/50"
-                                      : "text-slate-500 bg-slate-800/50 border-slate-700/50",
+                                    "inline-flex items-center gap-1 shrink-0 rounded border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide",
+                                    motionCfg.pill,
                                   )}
                                 >
-                                  {live ? "Live" : "Offline"}
+                                  <span className={cn("h-1.5 w-1.5 rounded-full", motionCfg.dot)} />
+                                  {motionCfg.label}
                                 </span>
-                                {device.lastIgnitionOn === true && (
-                                  <span className="text-[9px] text-amber-400/90 font-medium">ACC on</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                                {reg || `IMEI …${device.imei.slice(-6)}`}
+                              </p>
+                              {assignee && (
+                                <p className="text-[10px] text-blue-300/75 truncate">{assignee}</p>
+                              )}
+                              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="text-sm font-bold tabular-nums text-slate-100">
+                                  {speed != null ? `${speed}` : "—"}
+                                  <span className="text-[10px] font-medium text-slate-500 ml-0.5">km/h</span>
+                                </span>
+                                <span className="text-slate-600">·</span>
+                                <span
+                                  className={cn(
+                                    "text-[10px] font-medium tabular-nums",
+                                    freshnessClassDark(freshness),
+                                  )}
+                                >
+                                  {formatFreshnessAgo(device.lastSeenAt)}
+                                </span>
+                                {device.lastIgnitionOn != null && (
+                                  <>
+                                    <span className="text-slate-600">·</span>
+                                    <span
+                                      className={cn(
+                                        "text-[10px] font-semibold",
+                                        device.lastIgnitionOn
+                                          ? "text-amber-400/90"
+                                          : "text-slate-500",
+                                      )}
+                                    >
+                                      {ignitionLabel(device.lastIgnitionOn)}
+                                    </span>
+                                  </>
                                 )}
                               </div>
-                              <p className="text-[10px] text-slate-500 mt-1 truncate">
-                                {speed ? `${speed}` : "No speed"}
-                                {seen ? ` · ${seen}` : ""}
-                              </p>
                             </div>
                           </div>
                         </button>
-                        <Link
-                          href={`/fleet?device=${device.id}`}
-                          className="block px-3 pb-2 text-[10px] text-blue-400/90 hover:underline"
-                        >
-                          History & details →
-                        </Link>
+                        <div className="px-3 pb-2 flex gap-3">
+                          <Link
+                            href={`/fleet?device=${device.id}`}
+                            className="text-[10px] text-blue-400/90 hover:underline"
+                          >
+                            Details & history →
+                          </Link>
+                          {!online && device.lastSeenAt && (
+                            <span className="text-[10px] text-slate-600">Last known position</span>
+                          )}
+                        </div>
                       </li>
                     );
                   })}

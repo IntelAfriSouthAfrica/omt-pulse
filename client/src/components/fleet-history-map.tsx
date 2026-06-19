@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps-loader";
+import { pathDistanceKm } from "@/lib/fleet-intelligence";
 import { cn } from "@/lib/utils";
 
 export type FleetHistoryPoint = {
@@ -9,6 +10,7 @@ export type FleetHistoryPoint = {
   longitude: number;
   recordedAt: string;
   gpsValid?: boolean;
+  speedKph?: number | null;
 };
 
 type Props = {
@@ -59,6 +61,13 @@ export function FleetHistoryMap({ positions, className, testId = "fleet-history-
         mapTypeControl: true,
         streetViewControl: false,
         fullscreenControl: true,
+        styles: [
+          { elementType: "geometry", stylers: [{ color: "#1e293b" }] },
+          { elementType: "labels.text.fill", stylers: [{ color: "#94a3b8" }] },
+          { featureType: "road", elementType: "geometry", stylers: [{ color: "#334155" }] },
+          { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f172a" }] },
+          { featureType: "poi", stylers: [{ visibility: "off" }] },
+        ],
       });
     }
 
@@ -85,9 +94,9 @@ export function FleetHistoryMap({ positions, className, testId = "fleet-history-
     polylineRef.current = new google.maps.Polyline({
       path,
       map,
-      strokeColor: "#2563eb",
-      strokeWeight: 4,
-      strokeOpacity: 0.85,
+      strokeColor: "#3b82f6",
+      strokeWeight: 5,
+      strokeOpacity: 0.92,
       zIndex: 10,
     });
 
@@ -181,30 +190,6 @@ export function FleetHistoryMap({ positions, className, testId = "fleet-history-
 }
 
 export function estimatePathDistanceKm(path: Array<{ lat: number; lng: number }>): number | null {
-  if (path.length < 2) return null;
-
-  if (window.google?.maps?.geometry?.spherical) {
-    const meters = google.maps.geometry.spherical.computeLength(
-      path.map((p) => new google.maps.LatLng(p.lat, p.lng)),
-    );
-    return meters / 1000;
-  }
-
-  let totalKm = 0;
-  for (let i = 1; i < path.length; i++) {
-    totalKm += haversineKm(path[i - 1], path[i]);
-  }
-  return totalKm;
-}
-
-function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const r = 6371;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
+  const km = pathDistanceKm(path);
+  return km != null && km > 0 ? km : null;
 }

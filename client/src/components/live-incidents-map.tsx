@@ -2,6 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, MapPin, Layers, Car, Crosshair } from "lucide-react";
 import { loadGoogleMaps, resetGoogleMapsLoader } from "@/lib/google-maps-loader";
+import {
+  MOTION_STATUS,
+  formatFreshnessAgo,
+  headingLabel,
+  ignitionLabel,
+  type VehicleMotionStatus,
+} from "@/lib/fleet-intelligence";
 import { cn } from "@/lib/utils";
 
 export type OnlineUserMapMarker = {
@@ -24,6 +31,9 @@ export type TrackerMapMarker = {
   ignitionOn: boolean | null;
   lastPositionAt: string | null;
   lastSeenAt: string | null;
+  driverName?: string | null;
+  registration?: string | null;
+  motionStatus?: "moving" | "idle" | "offline";
 };
 
 export type LiveIncidentMapResponder = {
@@ -278,53 +288,96 @@ function buildTeamInfoHtml(name: string, gpsTime: string, darkTheme: boolean): s
   </div>`;
 }
 
-function makeVehicleMarkerIcon(): google.maps.Icon {
-  const size = 38;
-  const cx = size / 2;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-    <circle cx="${cx}" cy="${cx}" r="16" fill="#3b82f6" opacity="0.14"/>
-    <circle cx="${cx}" cy="${cx}" r="13" fill="#0c1220" stroke="#60a5fa" stroke-width="1.75"/>
-    <path d="M12 22h2l.8-2h10.4l.8 2h2l-1.1-3a1.8 1.8 0 0 0-1.7-1.2H14.8a1.8 1.8 0 0 0-1.7 1.2L12 22zm1.8-5.2h12.4l1.2-3.2a1.2 1.2 0 0 0-1.1-.8H13.7a1.2 1.2 0 0 0-1.1.8l1.2 3.2zM15.5 22.8a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4zm7 0a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4z" fill="#93c5fd"/>
+function makeVehicleMarkerIcon(
+  status: VehicleMotionStatus,
+  heading: number | null,
+  shortLabel?: string | null,
+): google.maps.Icon {
+  const cfg = MOTION_STATUS[status];
+  const labelText = shortLabel ? shortLabel.replace(/[<>&]/g, "").slice(0, 14) : null;
+  const dotSize = 44;
+  const cx = dotSize / 2;
+  const rot = heading != null ? heading : 0;
+  const pulse =
+    status === "moving"
+      ? `<circle cx="${cx}" cy="${cx}" r="14" fill="${cfg.mapAccent}" opacity="0.25">
+           <animate attributeName="r" values="14;22;14" dur="1.6s" repeatCount="indefinite"/>
+           <animate attributeName="opacity" values="0.25;0;0.25" dur="1.6s" repeatCount="indefinite"/>
+         </circle>`
+      : status === "idle"
+        ? `<circle cx="${cx}" cy="${cx}" r="14" fill="${cfg.mapAccent}" opacity="0.18"/>`
+        : "";
+  const pillWidth = labelText ? Math.max(48, labelText.length * 7 + 16) : 0;
+  const svgW = labelText ? Math.max(dotSize, pillWidth + 4) : dotSize;
+  const svgH = labelText ? dotSize + 18 : dotSize;
+  const pillX = labelText ? (svgW - pillWidth) / 2 : 0;
+  const namePill = labelText
+    ? `<rect x="${pillX}" y="${dotSize}" width="${pillWidth}" height="15" rx="7.5" fill="#0f172a" stroke="${cfg.mapAccent}" stroke-width="1"/>
+       <text x="${svgW / 2}" y="${dotSize + 10}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="9" font-weight="700" fill="#f1f5f9">${labelText}</text>`
+    : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+    ${pulse}
+    <g transform="rotate(${rot} ${cx} ${cx})">
+      <circle cx="${cx}" cy="${cx}" r="15" fill="#0c1220" stroke="${cfg.mapAccent}" stroke-width="2"/>
+      <path d="M${cx} ${cx - 7} L${cx + 4.5} ${cx + 5} L${cx} ${cx + 2.5} L${cx - 4.5} ${cx + 5} Z" fill="${cfg.mapAccent}"/>
+      <rect x="${cx - 5}" y="${cx + 4}" width="10" height="4" rx="1.2" fill="${cfg.mapAccent}" opacity="0.85"/>
+    </g>
+    ${namePill}
   </svg>`;
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(size, size),
+    scaledSize: new google.maps.Size(svgW, svgH),
     anchor: new google.maps.Point(cx, cx),
   };
 }
 
 function buildVehicleInfoHtml(
-  label: string,
-  imei: string,
-  speedKph: number | null,
-  ignitionOn: boolean | null,
-  gpsTime: string,
+  tracker: TrackerMapMarker,
   darkTheme: boolean,
 ): string {
-  const safeLabel = label.replace(/[<>&]/g, "");
-  const safeImei = imei.replace(/[<>&]/g, "");
+  const safeLabel = tracker.label.replace(/[<>&]/g, "");
+  const status = tracker.motionStatus ?? "offline";
+  const cfg = MOTION_STATUS[status];
+  const statusLabel = cfg.label;
   const speedLine =
-    speedKph != null ? `${Math.round(speedKph)} km/h` : "Speed unknown";
-  const accLine =
-    ignitionOn === true ? "Ignition on" : ignitionOn === false ? "Ignition off" : "ACC unknown";
+    tracker.speedKph != null ? `${Math.round(tracker.speedKph)} km/h` : "—";
+  const headLine = headingLabel(tracker.heading);
+  const accLine = ignitionLabel(tracker.ignitionOn);
+  const updatedIso = tracker.lastPositionAt ?? tracker.lastSeenAt;
+  const updatedAgo = formatFreshnessAgo(updatedIso);
+  const driverLine = tracker.driverName?.trim() || null;
+  const regLine = tracker.registration?.trim() || null;
+
+  const row = (label: string, value: string, valueColor = "#e2e8f0") =>
+    `<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:6px">
+      <span style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em">${label}</span>
+      <span style="font-size:11px;font-weight:600;color:${valueColor};font-variant-numeric:tabular-nums">${value}</span>
+    </div>`;
+
   if (darkTheme) {
-    return `<div class="omt-map-iw-card" style="background:#0c1220;border:1px solid #2d3a4f;border-radius:10px;padding:11px 13px;min-width:188px;box-shadow:0 10px 28px rgba(0,0,0,0.5);font-family:system-ui,-apple-system,sans-serif;">
-      <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#f1f5f9;letter-spacing:-0.01em;line-height:1.3">${safeLabel}</p>
-      <p style="margin:0 0 8px;font-size:10px;color:#64748b;font-variant-numeric:tabular-nums">IMEI ${safeImei}</p>
-      <div style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 6px;border-radius:999px;background:rgba(59,130,246,0.12);border:1px solid rgba(96,165,250,0.35);margin-bottom:7px">
-        <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#60a5fa;box-shadow:0 0 6px rgba(96,165,250,0.8)"></span>
-        <span style="font-size:9px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:0.08em">Vehicle</span>
+    return `<div class="omt-map-iw-card" style="background:#0c1220;border:1px solid #2d3a4f;border-radius:12px;padding:12px 14px;min-width:210px;box-shadow:0 12px 32px rgba(0,0,0,0.55);font-family:system-ui,-apple-system,sans-serif;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <div style="min-width:0">
+          <p style="margin:0;font-size:14px;font-weight:700;color:#f8fafc;letter-spacing:-0.02em;line-height:1.25">${safeLabel}</p>
+          ${regLine ? `<p style="margin:2px 0 0;font-size:10px;color:#94a3b8;font-weight:500">${regLine.replace(/[<>&]/g, "")}</p>` : ""}
+        </div>
+        <span style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:${cfg.mapGlow};border:1px solid ${cfg.mapAccent};font-size:9px;font-weight:700;color:${cfg.mapAccent};text-transform:uppercase;letter-spacing:0.08em">${statusLabel}</span>
       </div>
-      <p style="margin:0 0 3px;font-size:10px;color:#94a3b8">${speedLine} · ${accLine}</p>
-      <p style="margin:0;font-size:10px;color:#64748b;font-variant-numeric:tabular-nums">GPS · ${gpsTime}</p>
+      ${driverLine ? `<p style="margin:0 0 10px;font-size:11px;color:#93c5fd">Driver · ${driverLine.replace(/[<>&]/g, "")}</p>` : '<div style="height:4px"></div>'}
+      <div style="border-top:1px solid #1e293b;padding-top:8px">
+        ${row("Speed", speedLine, status === "moving" ? "#4ade80" : "#e2e8f0")}
+        ${row("Heading", headLine)}
+        ${row("Ignition", accLine, tracker.ignitionOn ? "#fbbf24" : "#94a3b8")}
+        ${row("Updated", updatedAgo, "#60a5fa")}
+      </div>
     </div>`;
   }
-  return `<div style="min-width:168px;font-family:system-ui,sans-serif;font-size:13px;line-height:1.5;padding:2px 0">
-    <div style="font-weight:700;margin-bottom:2px;font-size:14px;color:#111827">${safeLabel}</div>
-    <div style="color:#6b7280;font-size:11px;margin-bottom:4px">IMEI ${safeImei}</div>
-    <div style="color:#2563eb;font-size:11px;font-weight:600">Vehicle</div>
-    <div style="color:#6b7280;font-size:11px">${speedLine} · ${accLine}</div>
-    <div style="color:#6b7280;font-size:11px">GPS · ${gpsTime}</div>
+
+  return `<div style="min-width:188px;font-family:system-ui,sans-serif;padding:2px 0">
+    <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:2px">${safeLabel}</div>
+    <div style="font-size:11px;color:#2563eb;font-weight:600;margin-bottom:6px">${statusLabel}</div>
+    <div style="font-size:11px;color:#374151">Speed ${speedLine} · ${headLine} · ${accLine}</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:4px">Updated ${updatedAgo}</div>
   </div>`;
 }
 
@@ -964,35 +1017,29 @@ export function LiveIncidentsMap({
       }
     }
 
-    const icon = makeVehicleMarkerIcon();
     for (const tracker of trackers) {
       const pos = { lat: tracker.lat, lng: tracker.lng };
-      const updated = tracker.lastPositionAt
-        ? formatTime(tracker.lastPositionAt)
-        : tracker.lastSeenAt
-          ? formatTime(tracker.lastSeenAt)
-          : "Recently";
-      const html = buildVehicleInfoHtml(
-        tracker.label,
-        tracker.imei,
-        tracker.speedKph,
-        tracker.ignitionOn,
-        updated,
-        darkTheme,
+      const status = tracker.motionStatus ?? "offline";
+      const icon = makeVehicleMarkerIcon(
+        status,
+        tracker.heading,
+        tracker.registration?.slice(0, 10) ?? tracker.label.split(" ")[0],
       );
+      const html = buildVehicleInfoHtml(tracker, darkTheme);
       vehicleInfo.set(tracker.id, html);
 
       const existing = vehicleMap.get(tracker.id);
       if (existing) {
         existing.setPosition(pos);
         existing.setIcon(icon);
+        existing.setZIndex(status === "moving" ? 42 : status === "idle" ? 40 : 36);
       } else {
         const marker = new google.maps.Marker({
           position: pos,
           map,
           icon,
           title: tracker.label,
-          zIndex: 38,
+          zIndex: status === "moving" ? 42 : status === "idle" ? 40 : 36,
         });
         marker.addListener("click", () => {
           onTrackerMarkerClick?.(tracker.id);
