@@ -229,25 +229,55 @@ function makeJoinerMarkerIcon(label: string, pendingGps: boolean): google.maps.I
   };
 }
 
-function makeTeamMarkerIcon(label: string): google.maps.Icon {
-  const labelText = label.replace(/[<>&]/g, "") || "Team";
-  const pillWidth = Math.max(44, labelText.length * 7 + 14);
-  const svgW = Math.max(44, pillWidth);
-  const svgH = 50;
-  const dotCx = svgW / 2;
-  const pillX = (svgW - pillWidth) / 2;
-  const fill = "#059669";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
-    <circle cx="${dotCx}" cy="16" r="8" fill="${fill}" fill-opacity="0.2"/>
-    <circle cx="${dotCx}" cy="16" r="7" fill="${fill}" stroke="#ffffff" stroke-width="2"/>
-    <rect x="${pillX}" y="32" width="${pillWidth}" height="14" rx="7" fill="#1e293b" stroke="#34d399" stroke-width="1"/>
-    <text x="${dotCx}" y="42" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#ecfdf5">${labelText}</text>
+function makeTeamMarkerIcon(firstName: string, lastName: string): google.maps.Icon {
+  const initials =
+    `${(firstName.charAt(0) || "").toUpperCase()}${(lastName.charAt(0) || "").toUpperCase()}` || "?";
+  const size = 38;
+  const cx = size / 2;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${cx}" cy="${cx}" r="16" fill="#10b981" opacity="0.12"/>
+    <circle cx="${cx}" cy="${cx}" r="13" fill="#0c1220" stroke="#34d399" stroke-width="1.75"/>
+    <text x="${cx}" y="${cx + 4}" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="10.5" font-weight="700" fill="#ecfdf5" letter-spacing="0.5">${initials}</text>
   </svg>`;
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(svgW, svgH),
-    anchor: new google.maps.Point(dotCx, 16),
+    scaledSize: new google.maps.Size(size, size),
+    anchor: new google.maps.Point(cx, cx),
   };
+}
+
+function buildTeamInfoHtml(name: string, gpsTime: string, darkTheme: boolean): string {
+  const safeName = name.replace(/[<>&]/g, "");
+  if (darkTheme) {
+    return `<div class="omt-map-iw-card" style="background:#0c1220;border:1px solid #2d3a4f;border-radius:10px;padding:11px 13px;min-width:176px;box-shadow:0 10px 28px rgba(0,0,0,0.5);font-family:system-ui,-apple-system,sans-serif;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#f1f5f9;letter-spacing:-0.01em;line-height:1.3">${safeName}</p>
+      <div style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 6px;border-radius:999px;background:rgba(16,185,129,0.1);border:1px solid rgba(52,211,153,0.3);margin-bottom:7px">
+        <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#34d399;box-shadow:0 0 6px rgba(52,211,153,0.8)"></span>
+        <span style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:0.08em">On duty</span>
+      </div>
+      <p style="margin:0;font-size:10px;color:#64748b;font-variant-numeric:tabular-nums">GPS · ${gpsTime}</p>
+    </div>`;
+  }
+  return `<div style="min-width:160px;font-family:system-ui,sans-serif;font-size:13px;line-height:1.5;padding:2px 0">
+    <div style="font-weight:700;margin-bottom:4px;font-size:14px;color:#111827">${safeName}</div>
+    <div style="color:#059669;font-size:11px;font-weight:600">On duty</div>
+    <div style="color:#6b7280;font-size:11px">GPS · ${gpsTime}</div>
+  </div>`;
+}
+
+function ensureDarkInfoWindowStyles(): void {
+  const id = "omt-map-iw-dark";
+  if (document.getElementById(id)) return;
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = `
+    .gm-style .gm-style-iw-c { padding: 0 !important; background: transparent !important; box-shadow: none !important; }
+    .gm-style .gm-style-iw-d { overflow: hidden !important; max-height: none !important; }
+    .gm-style .gm-style-iw-tc::after { background: #0c1220 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.35) !important; }
+    .gm-style button.gm-ui-hover-effect { opacity: 0.55 !important; top: 2px !important; right: 2px !important; }
+    .gm-style button.gm-ui-hover-effect > span { background: #94a3b8 !important; }
+  `;
+  document.head.appendChild(style);
 }
 
 type Props = {
@@ -323,7 +353,7 @@ export function LiveIncidentsMap({
   const [mapsErrorMsg, setMapsErrorMsg] = useState<string | null>(null);
   const [mapsLoadAttempt, setMapsLoadAttempt] = useState(0);
   const [showTraffic, setShowTraffic] = useState(false);
-  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
+  const [mapType, setMapType] = useState<"roadmap" | "hybrid">("roadmap");
 
   useEffect(() => {
     let cancelled = false;
@@ -347,6 +377,7 @@ export function LiveIncidentsMap({
 
   useEffect(() => {
     if (!mapsReady || !mapRef.current || mapInstanceRef.current) return;
+    if (darkTheme) ensureDarkInfoWindowStyles();
     const map = new google.maps.Map(mapRef.current, {
       center: initialCenter,
       zoom: initialZoom,
@@ -400,8 +431,15 @@ export function LiveIncidentsMap({
   }, [showTraffic, mapsReady]);
 
   useEffect(() => {
-    mapInstanceRef.current?.setMapTypeId(mapType);
-  }, [mapType, mapsReady]);
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.setMapTypeId(mapType);
+    if (darkTheme) {
+      map.setOptions({
+        styles: mapType === "roadmap" ? CONTROL_ROOM_MAP_STYLES : [],
+      });
+    }
+  }, [mapType, mapsReady, darkTheme]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -806,27 +844,23 @@ export function LiveIncidentsMap({
 
     for (const user of onlineUsers) {
       const pos = { lat: user.lat, lng: user.lng };
-      const label = user.firstName || "Team";
       const name = `${user.firstName} ${user.lastName}`.trim();
       const updated = user.lastPositionAt
         ? formatTime(user.lastPositionAt)
         : "Recently";
-      const html = `<div style="min-width:160px;font-family:system-ui;font-size:13px;line-height:1.5;padding:2px 0">
-        <div style="font-weight:700;margin-bottom:4px;font-size:14px">${name}</div>
-        <div style="color:#059669;font-size:11px;font-weight:600">Online · team member</div>
-        <div style="color:#6b7280;font-size:11px">GPS ${updated}</div>
-      </div>`;
+      const html = buildTeamInfoHtml(name, updated, darkTheme);
       teamInfo.set(user.id, html);
 
       const existing = teamMap.get(user.id);
+      const icon = makeTeamMarkerIcon(user.firstName, user.lastName);
       if (existing) {
         existing.setPosition(pos);
-        existing.setIcon(makeTeamMarkerIcon(label));
+        existing.setIcon(icon);
       } else {
         const marker = new google.maps.Marker({
           position: pos,
           map,
-          icon: makeTeamMarkerIcon(label),
+          icon,
           title: name,
           zIndex: 40,
         });
@@ -841,7 +875,7 @@ export function LiveIncidentsMap({
         teamMap.set(user.id, marker);
       }
     }
-  }, [onlineUsers, mapsReady]);
+  }, [onlineUsers, mapsReady, darkTheme]);
 
   useEffect(() => {
     if (highlightId == null) return;
@@ -933,13 +967,13 @@ export function LiveIncidentsMap({
         <div className="absolute top-2 right-2 flex flex-col gap-1.5 z-10">
           <button
             type="button"
-            onClick={() => setMapType((t) => (t === "roadmap" ? "satellite" : "roadmap"))}
-            className={controlBtnClass(mapType === "satellite")}
-            title="Toggle satellite view"
+            onClick={() => setMapType((t) => (t === "roadmap" ? "hybrid" : "roadmap"))}
+            className={controlBtnClass(mapType === "hybrid")}
+            title="Satellite imagery with road and place labels"
             data-testid="button-toggle-satellite"
           >
             <Layers className="h-3.5 w-3.5" />
-            {mapType === "satellite" ? "Satellite" : "Map"}
+            {mapType === "hybrid" ? "Hybrid" : "Map"}
           </button>
           <button
             type="button"
