@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
-import { Siren, X, CheckCircle2, Phone, Radio, AlertOctagon, MapPin } from "lucide-react";
+import { Siren, X, Phone, Radio, AlertOctagon, MapPin } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { GeoLocationSheet, type GeoMapView } from "@/components/incident-location-sheet";
@@ -58,15 +58,6 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const acknowledge = useMutation({
-    mutationFn: (id: number) => apiRequest("POST", `/api/incidents/${id}/acknowledge-panic`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/panic/recent"] });
-      toast({ title: "Acknowledged", description: "The panicker has been notified that you are responding." });
-    },
-    onError: () => toast({ title: "Failed to acknowledge", variant: "destructive" }),
-  });
-
   const closePanic = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/incidents/${id}/close-panic`, {}),
     onSuccess: () => {
@@ -87,12 +78,13 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
 
   async function respondLive(alert: PanicAlert) {
     const hasGps = alert.lat != null && alert.lng != null;
+    const alreadyAcked = !!currentUserId && alert.acknowledgedBy.some((a) => a.userId === currentUserId);
     setJoiningId(alert.id);
     try {
-      // Join the panicker's existing live incident (the panic itself is live).
-      // Idempotent: server allows re-join attempts; on the rare race where
-      // the panic was just closed, we surface a clear error rather than
-      // silently dropping the responder into a new live session.
+      if (!alreadyAcked) {
+        await apiRequest("POST", `/api/incidents/${alert.id}/acknowledge-panic`, {});
+        queryClient.invalidateQueries({ queryKey: ["/api/panic/recent"] });
+      }
       await joinPanic.mutateAsync(alert.id);
       if (hasGps) {
         const target = {
@@ -240,18 +232,7 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
                   </button>
                 ) : (
                   <>
-                    {!hasAcked && (
-                      <button
-                        onClick={() => acknowledge.mutate(alert.id)}
-                        disabled={acknowledge.isPending}
-                        className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-60 transition-colors"
-                        data-testid={`button-acknowledge-panic${suffix}-${alert.id}`}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Acknowledge
-                      </button>
-                    )}
-                    {hasAcked && !hasArrived && (
+                    {!hasArrived && (
                       <button
                         onClick={() => respondLive(alert)}
                         disabled={joiningId === alert.id}
@@ -259,7 +240,7 @@ export function PanicBanner({ alerts, currentUserId, dismissedIds, onDismiss, te
                         data-testid={`button-respond-live-panic${suffix}-${alert.id}`}
                       >
                         <Radio className="h-3.5 w-3.5" />
-                        Respond Live
+                        {joiningId === alert.id ? "Joining…" : hasAcked ? "Open live view" : "Respond now"}
                       </button>
                     )}
                     {hasArrived && (
