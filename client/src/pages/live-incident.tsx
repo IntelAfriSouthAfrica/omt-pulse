@@ -49,6 +49,10 @@ import { usePanickerLocationSync } from "@/hooks/use-panicker-location-sync";
 import { LocationPermissionGuide } from "@/components/location-permission-guide";
 import { LiveIncidentArrivalForm } from "@/components/live-incident-arrival-form";
 import {
+  LiveIncidentJoinPromptSheet,
+  type JoinPromptDetails,
+} from "@/components/live-incident-join-prompt-sheet";
+import {
   LiveIncidentDestinationSheet,
   LiveIncidentJoinerNavSheet,
   LiveIncidentNavBottomBar,
@@ -683,6 +687,8 @@ export default function LiveIncidentPage() {
   /** Creator flow: true while the responder is picking a destination after Start Navigation. */
   const [destinationPickerOpen, setDestinationPickerOpen] = useState(false);
   const [joinerNavPickerOpen, setJoinerNavPickerOpen] = useState(false);
+  const [joinPrompt, setJoinPrompt] = useState<JoinPromptDetails | null>(null);
+  const [joinPromptSubmitting, setJoinPromptSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [wakeLockUnsupportedDismissed, setWakeLockUnsupportedDismissed] = useState(false);
 
@@ -768,9 +774,13 @@ export default function LiveIncidentPage() {
   const liveNavTarget = currentIncident && isJoinerMode
     ? resolveLiveNavTarget(currentIncident)
     : null;
-  /** Joiner has not yet picked Direct vs Guided — keep map and turn-by-turn hidden. */
+  /** Joiner has not yet picked Direct vs Guided — panic joiners go straight to map tracking. */
   const joinerChoosingNav =
-    isJoinerMode && !!joinerNavDestination && !navMode && !navStarted;
+    isJoinerMode
+    && !!joinerNavDestination
+    && !navMode
+    && !navStarted
+    && !(currentIncident?.categoryName ?? "").toLowerCase().includes("panic");
   /** Live incident active but not in full-screen nav — pin map between header and footer. */
   const pinnedFieldLayout = Boolean(currentIncident && !navMode && !showArrivalForm);
 
@@ -1532,6 +1542,87 @@ export default function LiveIncidentPage() {
     queryClient.invalidateQueries({ queryKey: ["/api/incidents/live"] });
   }
 
+  function buildJoinPromptDetails(inc: LiveIncidentWithResponders): JoinPromptDetails {
+    const isPanic = (inc.categoryName ?? "").toLowerCase().includes("panic");
+    return {
+      id: inc.id,
+      isPanic,
+      initiatorName: `${inc.responderFirstName ?? ""} ${inc.responderLastName ?? ""}`.trim() || "Responder",
+      categoryName: inc.categoryName,
+      severityLabel: inc.severity ? inc.severity.toUpperCase() : null,
+      destinationName: inc.destinationName?.trim() || null,
+    };
+  }
+
+  function buildJoinPromptFromIncident(inc: Incident, categoryName?: string | null): JoinPromptDetails {
+    const cat = categoryName ?? categories.find((c) => c.id === inc.categoryId)?.name ?? inc.categoryName ?? null;
+    const isPanic = (cat ?? "").toLowerCase().includes("panic");
+    const initiatorName = `${(inc as LiveIncidentWithResponders).responderFirstName ?? ""} ${(inc as LiveIncidentWithResponders).responderLastName ?? ""}`.trim()
+      || "Responder";
+    return {
+      id: inc.id,
+      isPanic,
+      initiatorName,
+      categoryName: cat,
+      severityLabel: inc.severity ? inc.severity.toUpperCase() : null,
+      destinationName: inc.destinationName?.trim() || null,
+    };
+  }
+
+  function enterJoinedIncident(id: number) {
+    localStorage.setItem(JOINED_INCIDENT_KEY, String(id));
+    setJoinedId(id);
+    gpsEndpointRef.current = "joiner-position";
+    startTracking(id);
+  }
+
+  function openJoinPrompt(inc: LiveIncidentWithResponders) {
+    setJoinPrompt(buildJoinPromptDetails(inc));
+  }
+
+  function declineJoinPrompt() {
+    setJoinPrompt(null);
+    navigate("/");
+  }
+
+  async function confirmJoinPrompt() {
+    if (!joinPrompt || joinPromptSubmitting) return;
+    if (joinPrompt.isPanic) {
+      setJoinPromptSubmitting(true);
+      try {
+        await apiRequest("POST", `/api/incidents/${joinPrompt.id}/acknowledge-panic`, {});
+        await apiRequest("POST", `/api/incidents/${joinPrompt.id}/join-live`, {});
+        await queryClient.refetchQueries({ queryKey: ["/api/incidents/live"] });
+        const inc =
+          liveIncidents.find((i) => i.id === joinPrompt.id)
+          ?? ((await (await fetch(`/api/incidents/${joinPrompt.id}`, { credentials: "include" })).json()) as Incident);
+        const dest = resolveJoinerNavDestination(inc as LiveIncidentWithResponders);
+        if (dest) {
+          try {
+            localStorage.setItem("omt_panic_target", JSON.stringify({ lat: dest.lat, lng: dest.lng, name: dest.name }));
+          } catch { /* ignore */ }
+        }
+        setStaleJoinNotice(null);
+        setJoinPrompt(null);
+        enterJoinedIncident(joinPrompt.id);
+        await queryClient.refetchQueries({ queryKey: ["/api/panic/recent"] });
+        toast({ title: "Responding", description: "You are now tracking their live location." });
+      } catch (e: unknown) {
+        toast({
+          title: "Could not respond",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setJoinPromptSubmitting(false);
+      }
+      return;
+    }
+    const id = joinPrompt.id;
+    setJoinPrompt(null);
+    joinLiveMutation.mutate(id);
+  }
+
   const joinLiveMutation = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/incidents/${id}/join-live`, {}),
     onSuccess: async (_, id) => {
@@ -1567,7 +1658,7 @@ export default function LiveIncidentPage() {
     },
   });
 
-  // Opened from a push notification — auto-join the incident (reporters cannot use Live Monitor).
+  // Opened from a push notification — show join/respond prompt (no silent auto-join).
   useEffect(() => {
     if (!liveQueryLoaded || !me || joinFromPushRef.current) return;
     const joinParam = new URLSearchParams(window.location.search).get("join");
@@ -1579,25 +1670,17 @@ export default function LiveIncidentPage() {
     void queryClient.invalidateQueries({ queryKey: ["/api/incidents/live"] });
     if (joinedId === id || liveId === id) return;
 
-    const showClosedNotice = (closedAt: string | null) => {
-      setStaleJoinNotice({ id, closedAt });
-    };
+    const alreadyJoined = liveIncidents.some(
+      (i) => i.id === id && i.isLive && (i.responders ?? []).some((r) => r.userId === me.id && !r.arrivedAt),
+    );
+    if (alreadyJoined) {
+      enterJoinedIncident(id);
+      return;
+    }
 
-    const tryJoin = () => {
-      const alreadyJoined = liveIncidents.some(
-        (i) => i.id === id && i.isLive && (i.responders ?? []).some((r) => r.userId === me.id && !r.arrivedAt),
-      );
-      if (alreadyJoined) {
-        localStorage.setItem(JOINED_INCIDENT_KEY, String(id));
-        setJoinedId(id);
-        return;
-      }
-      joinLiveMutation.mutate(id);
-    };
-
-    const isLiveOnServer = liveIncidents.some((i) => i.id === id && i.isLive);
-    if (isLiveOnServer) {
-      tryJoin();
+    const liveInc = liveIncidents.find((i) => i.id === id && i.isLive);
+    if (liveInc) {
+      setJoinPrompt(buildJoinPromptDetails(liveInc));
       return;
     }
 
@@ -1610,12 +1693,15 @@ export default function LiveIncidentPage() {
             const closedAt = inc.liveEndedAt
               ? new Date(inc.liveEndedAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", hour12: false })
               : null;
-            showClosedNotice(closedAt);
+            setStaleJoinNotice({ id, closedAt });
             return;
           }
+          setJoinPrompt(buildJoinPromptFromIncident(inc));
+          return;
         }
-      } catch { /* fall through — attempt join */ }
-      tryJoin();
+      } catch { /* fall through */ }
+      toast({ title: "Incident unavailable", description: "Could not load this live incident.", variant: "destructive" });
+      navigate("/");
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveQueryLoaded, me?.id, joinedId, liveId, liveIncidents]);
@@ -4134,8 +4220,8 @@ export default function LiveIncidentPage() {
                     <Button
                       size="sm"
                       className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white"
-                      onClick={() => joinLiveMutation.mutate(inc.id)}
-                      disabled={joinLiveMutation.isPending}
+                      onClick={() => openJoinPrompt(inc)}
+                      disabled={joinLiveMutation.isPending || joinPromptSubmitting}
                       data-testid={`button-join-incident-${inc.id}`}
                     >
                       {joinLiveMutation.isPending && (joinLiveMutation.variables as number) === inc.id
@@ -4625,6 +4711,32 @@ export default function LiveIncidentPage() {
               )}
             </div>
           ) : !navStarted && !navMode ? (
+            isPanicIncident && isJoinerMode ? (
+              <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+                <p className="text-center text-sm text-muted-foreground px-2">
+                  GPS shared with dispatch
+                  {joinerNavDestination ? ` · tracking ${joinerNavDestination.name.replace(/^🆘\s*/, "")}` : ""}
+                </p>
+                {joinerNavDestination ? (
+                  <LiveIncidentStartNavigationCta
+                    onStart={() => setJoinerNavPickerOpen(true)}
+                    dispatching={dispatching}
+                    label="Start navigation"
+                  />
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full border-blue-500/60 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
+                  disabled={leaveLiveMutation.isPending}
+                  onClick={() => joinedId !== null && leaveLiveMutation.mutate(joinedId)}
+                  data-testid="button-leave-live"
+                >
+                  {leaveLiveMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <LogOut className="h-4 w-4 mr-1.5" />}
+                  Leave response
+                </Button>
+              </div>
+            ) : (
             <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               <LiveIncidentBypassNavigationCta onBypass={bypassInAppNavigation} disabled={dispatching} />
               <LiveIncidentStartNavigationCta
@@ -4639,6 +4751,7 @@ export default function LiveIncidentPage() {
                 label="Start Navigation"
               />
             </div>
+            )
           ) : !navMode ? (
             /* Live incident active — en route or between flows; subtle early arrival */
             <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
@@ -4768,6 +4881,14 @@ export default function LiveIncidentPage() {
             ? useIncidentLocationAsDestination
             : undefined
         }
+      />
+
+      <LiveIncidentJoinPromptSheet
+        open={joinPrompt !== null}
+        details={joinPrompt}
+        submitting={joinPromptSubmitting || joinLiveMutation.isPending}
+        onConfirm={() => { void confirmJoinPrompt(); }}
+        onDecline={declineJoinPrompt}
       />
 
       {joinerNavDestination ? (
