@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -508,6 +508,8 @@ export default function LiveIncidentPage() {
   // ── Native map (Capacitor Android) ──────────────────────────────────────────
   const isNative = Capacitor.isNativePlatform();
   const [nativeMapFailed, setNativeMapFailed] = useState(false);
+  // useWebMap = true whenever we should use the Google Maps JS API instead of Capacitor native
+  const useWebMap = !isNative || nativeMapFailed;
   const capMapRef = useRef<CapacitorMapHandle | null>(null);
   const capDestMarkerIdRef = useRef<string>('');
   const capOriginMarkerIdRef = useRef<string>('');
@@ -609,10 +611,6 @@ export default function LiveIncidentPage() {
   const [isOffRoute, setIsOffRoute] = useState(false);
   const [guidedOffRoute, setGuidedOffRoute] = useState(false);
   const [navMode, setNavMode] = useState(false);
-  // Native Capacitor map only during full-screen navigation (tilt/bearing).
-  // Pre-nav field view uses the JS map so flex layout works on Android WebView.
-  const useNativeMap = isNative && !nativeMapFailed && navMode;
-  const useWebMap = !useNativeMap;
   /** Direct = bearing/distance to live target; Guided = turn-by-turn. */
   const [activeNavStyle, setActiveNavStyle] = useState<JoinNavStyle>(() => readStoredJoinNavStyle());
   const [directDist, setDirectDist] = useState<number | null>(null);
@@ -644,6 +642,9 @@ export default function LiveIncidentPage() {
   const currentStepIndexRef = useRef(0);
   // Scrollable content container — scrolled to top when nav mode is entered.
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const pinnedSummaryRef = useRef<HTMLDivElement>(null);
+  const fieldFooterRef = useRef<HTMLDivElement>(null);
+  const mapHostRef = useRef<HTMLDivElement>(null);
 
   // Arrival form state
   const [showArrivalForm, setShowArrivalForm] = useState(false);
@@ -748,27 +749,35 @@ export default function LiveIncidentPage() {
   const pinnedFieldLayout = Boolean(currentIncident && !navMode && !showArrivalForm);
 
   const destinationSheetGps = useMemo(
-    () => resolveFieldGpsCoords(currentIncident, userLoc ?? lastPosRef.current),
-    [currentIncident, userLoc, gpsLastSentAt],
+    () => resolveFieldGpsCoords(currentIncident, userLoc),
+    [currentIncident, userLoc],
   );
 
-  // JS map fills its flex parent reliably; nudge resize when the field layout settles.
-  useEffect(() => {
-    if (!useWebMap || !mapsReady || !mapInstanceRef.current) return;
-    const resize = () => {
-      if (!mapInstanceRef.current) return;
-      google.maps.event.trigger(mapInstanceRef.current, "resize");
-      if (lastPosRef.current && pinnedFieldLayout) {
-        mapInstanceRef.current.setCenter(lastPosRef.current);
-      }
-    };
-    const t1 = window.setTimeout(resize, 80);
-    const t2 = window.setTimeout(resize, 400);
+  // The field-view map is a normal in-flow flex child (flex-1). The native
+  // MapView is created only after its host reaches a stable height (see
+  // CapacitorMap), so it fills the region correctly. Whenever the field layout
+  // settles or the destination sheet toggles, nudge a bounds re-sync so the
+  // native surface stays aligned with the element.
+  useLayoutEffect(() => {
+    if (!pinnedFieldLayout || !isNative || navMode) return;
+    const sync = () => { void capMapRef.current?.syncBounds(); };
+    const t1 = window.setTimeout(sync, 60);
+    const t2 = window.setTimeout(sync, 350);
+    const t3 = window.setTimeout(sync, 900);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
     };
-  }, [useWebMap, mapsReady, pinnedFieldLayout, currentIncidentId, destinationPickerOpen]);
+  }, [
+    pinnedFieldLayout,
+    isNative,
+    navMode,
+    currentIncidentId,
+    nativeMapReadyAt,
+    destinationPickerOpen,
+    gpsLastSentAt,
+  ]);
 
   // Screen Wake Lock — keep the screen on for the full duration of any live
   // incident (creator or joiner). Released automatically when the incident ends
@@ -886,7 +895,7 @@ export default function LiveIncidentPage() {
     stepsRef.current = [];
     setHasRoute(false);
     setRouteInfo(null);
-    if (useNativeMap && capMapRef.current) {
+    if (isNative && capMapRef.current) {
       await capMapRef.current.clearRoute().catch(() => {});
     }
     if (directionsRendererRef.current) {
@@ -915,7 +924,7 @@ export default function LiveIncidentPage() {
   }
 
   async function refreshDestMarker(dlat: number, dlng: number, title: string) {
-    if (useNativeMap && capMapRef.current) {
+    if (isNative && capMapRef.current) {
       const cap = capMapRef.current;
       if (capDestMarkerIdRef.current) {
         await cap.removeMarker(capDestMarkerIdRef.current).catch(() => {});
@@ -1146,7 +1155,7 @@ export default function LiveIncidentPage() {
         }
       }
       originMarkerRef.current?.setPosition(p);
-      if (useNativeMap && capMapRef.current) {
+      if (isNative && capMapRef.current) {
         // ── Native camera + user marker ────────────────────────────────────────
         // Place/update the blue "you are here" dot on the native map. The
         // originMarkerRef above is a JS-API Marker and does nothing on native.
@@ -1938,11 +1947,7 @@ export default function LiveIncidentPage() {
   }, [initJsApi]);
 
   useEffect(() => {
-    if (!useWebMap || !mapsReady || !mapRef.current) return;
-    if (mapInstanceRef.current) {
-      google.maps.event.trigger(mapInstanceRef.current, "resize");
-      return;
-    }
+    if (!useWebMap || !mapsReady || !mapRef.current || mapInstanceRef.current) return;
     const map = new google.maps.Map(mapRef.current, {
       center: { lat: -26.2041, lng: 28.0473 },
       zoom: 6,
@@ -1993,15 +1998,7 @@ export default function LiveIncidentPage() {
       { enableHighAccuracy: true, timeout: 8000 }
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapsReady, useWebMap]);
-
-  useEffect(() => {
-    if (useWebMap) return;
-    mapInstanceRef.current = null;
-    directionsRendererRef.current = null;
-    originMarkerRef.current = null;
-    destMarkerRef.current = null;
-  }, [useWebMap]);
+  }, [mapsReady, nativeMapFailed]);
 
   // Fallback: if localStorage was cleared (fresh app open), auto-detect this
   // user's active live incident from the server query and resume tracking.
@@ -2134,7 +2131,7 @@ export default function LiveIncidentPage() {
     // Proceeding on mapsReady alone (JS API loaded but native map not yet ready)
     // causes drawRoute to fail silently, sets autoResumedNavRef=true, then the
     // native-ready re-trigger is permanently blocked by the guard.
-    const mapActuallyReady = mapsReady;
+    const mapActuallyReady = isNative ? nativeMapStatus === "ready" : mapsReady;
     if (!mapActuallyReady || !currentIncident) return;
     const navDest = isJoinerMode && joinerNavDestination
       ? joinerNavDestination
@@ -2168,14 +2165,10 @@ export default function LiveIncidentPage() {
         return;
       }
       if (stepsRef.current.length === 0) {
-        setNavMode(true);
-        navModeRef.current = true;
-        await waitForNativeMapReady();
         drawRoute(navDest.lat, navDest.lng, lastPosRef.current ?? undefined, true);
-      } else {
-        setNavMode(true);
-        navModeRef.current = true;
+        if (isNative) await new Promise((r) => setTimeout(r, 1500));
       }
+      setNavMode(true);
       startStepTracking();
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2216,7 +2209,7 @@ export default function LiveIncidentPage() {
 
   // Route drawing — creators only; joiners pick Direct/Guided at navigate time.
   useEffect(() => {
-    const mapActuallyReady = mapsReady;
+    const mapActuallyReady = isNative ? nativeMapStatus === "ready" : mapsReady;
     if (!mapActuallyReady || !currentIncident || isJoinerMode) return;
     if (stepsRef.current.length === 0) {
       const dest =
@@ -2456,7 +2449,7 @@ export default function LiveIncidentPage() {
   function drawRoute(dlat: number, dlng: number, origin?: { lat: number; lng: number }, skipFitBounds = false) {
     const gen = ++drawRouteGenRef.current;
     // ── Native path ────────────────────────────────────────────────────────────
-    if (useNativeMap && capMapRef.current) {
+    if (isNative && capMapRef.current) {
       const cap = capMapRef.current;
       setRouteInfo(null);
       // Always place/refresh the destination marker — even when GPS has no fix yet.
@@ -2620,20 +2613,10 @@ export default function LiveIncidentPage() {
     }
   }
 
-  async function waitForNativeMapReady() {
-    if (!isNative || nativeMapFailed) return;
-    for (let i = 0; i < 50; i++) {
-      if (capMapRef.current) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    await new Promise((r) => setTimeout(r, 500));
-    await capMapRef.current?.syncBounds();
-  }
-
   async function beginInAppNavigation(dest: { lat: number; lng: number; name: string }) {
     const incId = currentIncidentId;
     if (!incId) return;
-    const mapActuallyReady = mapsReady || (isNative && (nativeMapStatus === "ready" || nativeMapFailed));
+    const mapActuallyReady = isNative ? nativeMapStatus === "ready" || nativeMapFailed : mapsReady;
     if (!mapActuallyReady) {
       toast({
         title: "Map still loading",
@@ -2663,10 +2646,11 @@ export default function LiveIncidentPage() {
       if (typeof DeviceOrientationEvent !== "undefined" && typeof (DeviceOrientationEvent as any).requestPermission === "function") {
         try { await (DeviceOrientationEvent as any).requestPermission(); } catch { /* denied — proceed */ }
       }
-      setNavMode(true);
-      navModeRef.current = true;
-      await waitForNativeMapReady();
       drawRoute(dest.lat, dest.lng, lastPosRef.current ?? undefined, true);
+      if (isNative && capMapRef.current) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      setNavMode(true);
       setActiveNavStyle("guided");
       activeNavStyleRef.current = "guided";
       startStepTracking();
@@ -2694,9 +2678,6 @@ export default function LiveIncidentPage() {
   }
 
   function openDestinationPicker() {
-    if (lastPosRef.current && isValidGpsPair(lastPosRef.current.lat, lastPosRef.current.lng)) {
-      setUserLoc(lastPosRef.current);
-    }
     setDestinationPickerOpen(true);
     const prefill = destination?.name && isUsableLocationSearchLabel(destination.name)
       ? destination.name
@@ -2759,11 +2740,9 @@ export default function LiveIncidentPage() {
 
     if (style === "direct") {
       await clearGuidedRouteVisuals();
-      setNavMode(true);
-      navModeRef.current = true;
-      await waitForNativeMapReady();
       await refreshDestMarker(dest.lat, dest.lng, dest.name);
       updateDirectNavMetrics();
+      setNavMode(true);
       startStepTracking();
       toast({
         title: "Direct guidance started",
@@ -2772,10 +2751,9 @@ export default function LiveIncidentPage() {
       return;
     }
 
-    setNavMode(true);
-    navModeRef.current = true;
-    await waitForNativeMapReady();
     drawRoute(dest.lat, dest.lng, origin, true);
+    if (isNative) await new Promise(r => setTimeout(r, 600));
+    setNavMode(true);
     startStepTracking();
     toast({ title: "Turn-by-turn started", description: "GPS tracking continues — dispatch can see your position." });
   }
@@ -2995,7 +2973,7 @@ export default function LiveIncidentPage() {
       scrollContainerRef.current.scrollTop = 0;
     }
     // ── Native (Capacitor) camera + step seeding ────────────────────────────────
-    if (useNativeMap && capMapRef.current && mapsReady) {
+    if (isNative && capMapRef.current && mapsReady) {
       if (navMode) {
         if (lastPosRef.current && stepsRef.current.length > 0) {
           const pos = lastPosRef.current;
@@ -3815,7 +3793,7 @@ export default function LiveIncidentPage() {
         {currentIncident ? (
           <>
             {!navMode && (
-              <div className={cn("shrink-0 space-y-2", pinnedFieldLayout && "px-4 pt-3 pb-1")}>
+              <div ref={pinnedSummaryRef} className={cn("shrink-0 space-y-2", pinnedFieldLayout && "px-4 pt-3 pb-1")}>
               <IncidentActiveSummary
                 incident={currentIncident}
                 isJoiner={isJoinerMode}
@@ -4099,11 +4077,12 @@ export default function LiveIncidentPage() {
           </div>
         ) : (
           <div
+            ref={mapHostRef}
             className={
               navMode
                 ? "relative overflow-hidden native-map-host flex-1 min-h-0 w-full h-full basis-0"
                 : pinnedFieldLayout
-                ? "relative overflow-hidden flex-1 min-h-0 w-full basis-0 rounded-xl border border-border/50 bg-muted/20 shadow-sm"
+                ? "relative overflow-hidden native-map-host live-field-map-host flex-1 min-h-0 w-full basis-0 rounded-xl border border-border/50 shadow-sm"
                 : "relative rounded-lg overflow-hidden min-h-[200px] flex-1 native-map-host"
             }
           >
@@ -4284,7 +4263,7 @@ export default function LiveIncidentPage() {
               <CapacitorMap
                 ref={capMapRef}
                 apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? ''}
-                className="absolute inset-0"
+                className={pinnedFieldLayout && !navMode ? "w-full h-full min-h-0" : "absolute inset-0"}
                 onReady={() => {
                   setNativeMapStatus("ready");
                   setNativeMapReadyAt(Date.now());
@@ -4643,7 +4622,7 @@ export default function LiveIncidentPage() {
             </div>
           ) : navMode ? null : showProminentArrived && !isPanicIncident ? (
             /* ---- Approaching destination (within 500 m) ---- */
-            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 px-4 py-2 text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
                 <MapPin className="h-4 w-4 shrink-0" />
                 <span>
@@ -4677,7 +4656,7 @@ export default function LiveIncidentPage() {
               )}
             </div>
           ) : !navStarted && !navMode ? (
-            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               <LiveIncidentStartNavigationCta
                 onStart={() => {
                   if (isJoinerMode && joinerNavDestination) {
@@ -4695,7 +4674,7 @@ export default function LiveIncidentPage() {
             </div>
           ) : !navMode ? (
             /* Live incident active — en route or between flows; subtle early arrival */
-            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} ref={fieldFooterRef} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               {!isPanicIncident && (
                 <button
                   type="button"
