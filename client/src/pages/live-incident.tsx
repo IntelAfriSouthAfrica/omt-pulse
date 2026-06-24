@@ -680,6 +680,8 @@ export default function LiveIncidentPage() {
   /** Joiner has not yet picked Direct vs Guided — keep map and turn-by-turn hidden. */
   const joinerChoosingNav =
     isJoinerMode && !!joinerNavDestination && !navMode && !navStarted;
+  /** Live incident active but not in full-screen nav — pin map between header and footer. */
+  const pinnedFieldLayout = Boolean(currentIncident && !navMode && !showArrivalForm);
 
   // Screen Wake Lock — keep the screen on for the full duration of any live
   // incident (creator or joiner). Released automatically when the incident ends
@@ -3535,6 +3537,11 @@ export default function LiveIncidentPage() {
     return gpsAgo ? `En route · GPS ${gpsAgo}` : "En route";
   }
 
+  const fieldActionFooterClass = cn(
+    "shrink-0 space-y-2",
+    pinnedFieldLayout && "px-4 pt-3 border-t border-border/50 bg-background/95 backdrop-blur-sm",
+  );
+
   return (
     <div className="flex flex-col h-full bg-background live-page-root">
       {/* v75: merged title + GPS status row. Single LIVE pill, inline GPS info,
@@ -3678,18 +3685,22 @@ export default function LiveIncidentPage() {
 
       <div
         ref={scrollContainerRef}
-        className={`flex flex-col flex-1 live-scroll ${
-          navMode ? "min-h-0 overflow-hidden p-0 gap-0" : "gap-3 p-4 overflow-y-auto"
-        }`}
+        className={cn(
+          "flex flex-col flex-1 min-h-0 live-scroll",
+          navMode || pinnedFieldLayout
+            ? "overflow-hidden p-0 gap-0 bg-background"
+            : "gap-3 p-4 overflow-y-auto",
+        )}
       >
         {currentIncident ? (
           <>
             {!navMode && (
+              <div className={cn("shrink-0 space-y-2", pinnedFieldLayout && "px-4 pt-3 pb-1")}>
               <IncidentActiveSummary
                 incident={currentIncident}
                 isJoiner={isJoinerMode}
                 categories={categories}
-                compact={isJoinerMode}
+                compact={isJoinerMode || pinnedFieldLayout}
                 showLoadRoute={
                   !isJoinerMode &&
                   !hasRoute &&
@@ -3703,7 +3714,6 @@ export default function LiveIncidentPage() {
                   )
                 }
               />
-            )}
             {!navMode && isJoinerMode && navRosterOthersCount > 0 && (
               <button
                 type="button"
@@ -3720,12 +3730,10 @@ export default function LiveIncidentPage() {
                 <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
               </button>
             )}
-            {/* Destination — hidden in nav mode so the map fills the screen */}
-            {!navMode && (
+            {/* Joiner-only destination status — creators pick via Start Navigation sheet */}
+            {!navMode && isJoinerMode && (
             <div className="space-y-1.5 shrink-0">
-              {isJoinerMode ? (
-                /* Joiner: show a navigate button to the creator's saved destination */
-                !navMode && joinerNavDestination ? (
+              {joinerNavDestination ? (
                   <div className="space-y-1.5">
                     {navStarted ? (
                       <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
@@ -3754,7 +3762,7 @@ export default function LiveIncidentPage() {
                       </div>
                     )}
                   </div>
-                ) : !navMode && isJoinerMode && isPanicIncident ? (
+                ) : isPanicIncident ? (
                   <div
                     className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 px-3 py-2.5 flex items-center gap-2 text-sm text-amber-900 dark:text-amber-200"
                     data-testid="panel-panic-location-pending"
@@ -3762,30 +3770,19 @@ export default function LiveIncidentPage() {
                     <MapPin className="h-4 w-4 shrink-0" />
                     Panicker GPS pending — the map updates when they turn location on
                   </div>
-                ) : !navMode ? (
+                ) : (
                   <div className="rounded-lg border border-dashed px-3 py-2.5 flex items-center gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4 shrink-0" />
                     Waiting for creator to set a destination…
                   </div>
-                ) : null
-              ) : null}
-              {/* v75: hidden in nav mode — the bottom strip on the map shows
-                  the prominent red distance/ETA in nav mode (no duplicate). */}
-              {!navMode && !isJoinerMode && routeInfo && (
-                <div className="flex gap-3 text-sm pt-0.5">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Navigation className="h-3.5 w-3.5" />
-                    <span className="font-medium text-foreground">{fmtDist(routeInfo.distance)}</span>
-                  </div>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="text-muted-foreground">ETA <span className="font-medium text-foreground">{fmtDur(routeInfo.duration)}</span></span>
-                </div>
-              )}
+                )}
             </div>
+            )}
+              </div>
             )}
 
             {!navMode && !joinerChoosingNav && hasRoute && currentStep && isJoinerMode ? (
-              <div className="rounded-lg border border-green-500/40 bg-green-500/5 px-4 py-3 space-y-2 shrink-0" data-testid="nav-panel">
+              <div className={cn("rounded-lg border border-green-500/40 bg-green-500/5 px-4 py-3 space-y-2 shrink-0", pinnedFieldLayout && "mx-4")} data-testid="nav-panel">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-base leading-snug flex-1 pr-2" data-testid="text-step-instruction">
                     {stripHtml(upcomingStep.instructions)}
@@ -3904,7 +3901,7 @@ export default function LiveIncidentPage() {
 
         {/* Responder status pill — non-nav mode only; nav mode shows the chip in the overlay */}
         {!navMode && !joinerChoosingNav && navResponders.length > 0 && (
-          <div className="flex items-center gap-1.5 px-1 shrink-0 text-xs font-medium text-green-700 dark:text-green-400" data-testid="chip-responders-nonav">
+          <div className={cn("flex items-center gap-1.5 shrink-0 text-xs font-medium text-green-700 dark:text-green-400", pinnedFieldLayout ? "px-4 pb-1" : "px-1")} data-testid="chip-responders-nonav">
             <Users className="h-3.5 w-3.5 shrink-0" />
             <span>
               {navResponders.length === 1
@@ -3921,7 +3918,8 @@ export default function LiveIncidentPage() {
             to 0px and the screen goes blank. */}
         <div
           className={cn(
-            navMode && "flex flex-1 flex-col min-h-0 min-w-0",
+            (navMode || pinnedFieldLayout) && "flex flex-1 flex-col min-h-0 min-w-0",
+            pinnedFieldLayout && "px-4 pb-2",
           )}
         >
         {isNative && (jsApiDegraded || jsApiRetrying) && !mapsError && (
@@ -3984,6 +3982,8 @@ export default function LiveIncidentPage() {
             className={
               navMode
                 ? "relative overflow-hidden native-map-host flex-1 min-h-0 w-full h-full"
+                : pinnedFieldLayout
+                ? "relative overflow-hidden native-map-host flex-1 min-h-0 w-full rounded-xl border border-border/50 bg-muted/20 shadow-sm"
                 : "relative rounded-lg overflow-hidden min-h-[200px] flex-1 native-map-host"
             }
           >
@@ -4521,7 +4521,7 @@ export default function LiveIncidentPage() {
             </div>
           ) : navMode ? null : showProminentArrived && !isPanicIncident ? (
             /* ---- Approaching destination (within 500 m) ---- */
-            <div className="shrink-0 space-y-2 pb-4" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 px-4 py-2 text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
                 <MapPin className="h-4 w-4 shrink-0" />
                 <span>
@@ -4555,7 +4555,7 @@ export default function LiveIncidentPage() {
               )}
             </div>
           ) : !navStarted && !navMode ? (
-            <div className="shrink-0 space-y-2" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               <LiveIncidentStartNavigationCta
                 onStart={() => {
                   if (isJoinerMode && joinerNavDestination) {
@@ -4573,7 +4573,7 @@ export default function LiveIncidentPage() {
             </div>
           ) : !navMode ? (
             /* Live incident active — en route or between flows; subtle early arrival */
-            <div className="shrink-0 space-y-2" style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
+            <div className={fieldActionFooterClass} style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}>
               {!isPanicIncident && (
                 <button
                   type="button"
