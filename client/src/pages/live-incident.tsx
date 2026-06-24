@@ -419,7 +419,7 @@ type NavRosterEntry = {
   userId: string;
   firstName: string;
   lastName: string;
-  role: "panicker" | "you" | "responder";
+  role: "panicker" | "creator" | "you" | "responder";
   status: "live" | "ack";
   joinedAt?: string | null;
   lastPositionAt?: string | null;
@@ -430,6 +430,7 @@ function buildNavRoster(opts: {
     userId: string | null;
     responderFirstName?: string | null;
     responderLastName?: string | null;
+    responderPositionUpdatedAt?: Date | string | null;
     responders?: Array<{
       userId: string;
       firstName: string;
@@ -448,12 +449,17 @@ function buildNavRoster(opts: {
   const byUserId = new Map<string, NavRosterEntry>();
 
   if (isJoiner && incident.userId) {
+    const creatorPositionAt =
+      incident.responderPositionUpdatedAt instanceof Date
+        ? incident.responderPositionUpdatedAt.toISOString()
+        : incident.responderPositionUpdatedAt ?? null;
     const row: NavRosterEntry = {
       userId: incident.userId,
-      firstName: incident.responderFirstName ?? "Panicker",
+      firstName: incident.responderFirstName ?? (isPanic ? "Panicker" : "Incident lead"),
       lastName: incident.responderLastName ?? "",
-      role: "panicker",
+      role: isPanic ? "panicker" : "creator",
       status: "live",
+      lastPositionAt: creatorPositionAt,
     };
     byUserId.set(row.userId, row);
     entries.push(row);
@@ -486,7 +492,13 @@ function buildNavRoster(opts: {
       lastPositionAt: r.lastPositionAt ?? null,
     };
     if (existing) {
-      Object.assign(existing, { ...row, role: existing.role === "panicker" ? "panicker" : row.role });
+      Object.assign(existing, {
+        ...row,
+        role:
+          existing.role === "panicker" || existing.role === "creator"
+            ? existing.role
+            : row.role,
+      });
     } else {
       byUserId.set(r.userId, row);
       entries.push(row);
@@ -3631,7 +3643,11 @@ export default function LiveIncidentPage() {
     if (others.length === 0) return "Responders";
     if (others.length === 1) {
       const o = others[0];
-      return o.role === "panicker" ? `${o.firstName} · SOS` : `${o.firstName} responding`;
+      return o.role === "panicker"
+        ? `${o.firstName} · SOS`
+        : o.role === "creator"
+          ? `${o.firstName} · live`
+          : `${o.firstName} responding`;
     }
     return `${others.length} responding`;
   }
@@ -3655,6 +3671,10 @@ export default function LiveIncidentPage() {
 
   function rosterStatusLabel(entry: NavRosterEntry): string {
     if (entry.role === "panicker") return "SOS — needs help";
+    if (entry.role === "creator") {
+      const gpsAgo = fmtTimeAgo(entry.lastPositionAt);
+      return gpsAgo ? `Live incident · GPS ${gpsAgo}` : "Live incident · at scene";
+    }
     if (entry.status === "ack") return "Acknowledged";
     const gpsAgo = fmtTimeAgo(entry.lastPositionAt);
     return gpsAgo ? `En route · GPS ${gpsAgo}` : "En route";
@@ -4882,7 +4902,7 @@ export default function LiveIncidentPage() {
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                       entry.role === "panicker"
                         ? "bg-red-600 text-white"
-                        : entry.status === "live"
+                        : entry.role === "creator" || entry.status === "live"
                           ? "bg-green-600 text-white"
                           : "bg-amber-500 text-white"
                     }`}
@@ -4898,6 +4918,8 @@ export default function LiveIncidentPage() {
                       {entry.firstName} {entry.lastName}
                       {entry.role === "you" ? (
                         <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
+                      ) : entry.role === "creator" ? (
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">(incident lead)</span>
                       ) : null}
                     </p>
                     <p className={`text-xs truncate ${entry.role === "panicker" ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}>
