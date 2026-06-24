@@ -253,6 +253,27 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
 
       (async () => {
         if (!elementRef.current) return;
+        // Wait for the host element to reach a STABLE size before creating the
+        // native MapView. The Android Maps SDK captures the element's screen
+        // rect at create time; if we create while the flex container is still
+        // resolving its height (summary card + footer settling), the native
+        // surface is locked to a too-small rect and `onResize` does not reliably
+        // re-stretch it — producing the "thin map strip + white gap" bug.
+        let prevH = -1;
+        let stableCount = 0;
+        for (let i = 0; i < 30; i++) {
+          if (cancelled || !elementRef.current) return;
+          const rect = elementRef.current.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 80 && rect.height === prevH) {
+            stableCount++;
+            if (stableCount >= 2) break;
+          } else {
+            stableCount = 0;
+          }
+          prevH = rect.height;
+          await new Promise((r) => setTimeout(r, 60));
+        }
+        if (cancelled || !elementRef.current) return;
         const map = await GoogleMap.create({
           id: NATIVE_MAP_ID,
           element: elementRef.current,
