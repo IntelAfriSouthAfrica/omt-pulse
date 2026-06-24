@@ -4263,7 +4263,7 @@ export default function LiveIncidentPage() {
               <CapacitorMap
                 ref={capMapRef}
                 apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? ''}
-                className={pinnedFieldLayout && !navMode ? "w-full h-full min-h-0" : "absolute inset-0"}
+                className="absolute inset-0"
                 onReady={() => {
                   setNativeMapStatus("ready");
                   setNativeMapReadyAt(Date.now());
