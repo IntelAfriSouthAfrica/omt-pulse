@@ -180,6 +180,13 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
     const syncBounds = useCallback(async () => {
       const el = elementRef.current;
       if (!el) return;
+      // Do nothing until the native map actually exists. Calling onResize before
+      // create() is a no-op on native, but it would still poison the dedup cache
+      // below with the current rect — which then suppresses the FIRST real resync
+      // after the map is ready, leaving the native surface stuck at its (often
+      // partial) create-time rect. This was the "white gap until you open/close
+      // the destination sheet" bug.
+      if (!mapRef.current) return;
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
       const bounds = {
@@ -289,9 +296,19 @@ const CapacitorMap = forwardRef<CapacitorMapHandle, CapacitorMapProps>(
         clearTimeout(timeoutId);
         mapRef.current = map;
         onReady?.();
-        void syncBounds();
-        setTimeout(() => { void syncBounds(); }, 100);
-        setTimeout(() => { void syncBounds(); }, 500);
+        // Force the first post-ready resync(s) through the dedup guard — the
+        // native map was just created and may have captured a partial rect, so
+        // we must push the true element bounds at least once now that the map
+        // exists. Spread several attempts to cover slow-device layout settling.
+        const forceSync = () => {
+          lastSyncedBoundsRef.current = { x: -1, y: -1, width: -1, height: -1 };
+          void syncBounds();
+        };
+        forceSync();
+        setTimeout(forceSync, 100);
+        setTimeout(forceSync, 500);
+        setTimeout(forceSync, 1200);
+        setTimeout(forceSync, 2500);
         // Query the actual renderer chosen by the Maps SDK and surface it to
         // the caller for on-screen diagnostics (no adb needed).
         if (onRendererKnown) {
