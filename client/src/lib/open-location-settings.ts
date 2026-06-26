@@ -195,6 +195,15 @@ export async function openLocationSettings(
 
   if (platform === "android" || platform === "ios") {
     if (await openViaNativeSettingsPlugin(platform, target)) {
+<<<<<<< Updated upstream
+=======
+      return {
+        result: "opened",
+        message: locationSettingsUserMessage(target),
+      };
+    }
+    if (platform === "android" && openAndroidIntentFallback(target)) {
+>>>>>>> Stashed changes
       return {
         result: "opened",
         message: `Opening Settings… ${manualMsg}`,
