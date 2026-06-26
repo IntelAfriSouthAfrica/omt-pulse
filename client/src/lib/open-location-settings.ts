@@ -195,31 +195,25 @@ export async function openLocationSettings(
 
   if (platform === "android" || platform === "ios") {
     if (await openViaNativeSettingsPlugin(platform, target)) {
-<<<<<<< Updated upstream
-=======
       return {
         result: "opened",
         message: locationSettingsUserMessage(target),
       };
     }
     if (platform === "android" && openAndroidIntentFallback(target)) {
->>>>>>> Stashed changes
       return {
         result: "opened",
-        message: `Opening Settings… ${manualMsg}`,
+        message: locationSettingsUserMessage(target),
       };
     }
-    if (platform === "android" && openAndroidIntentFallback(target)) {
-      return { result: "opened", message: `Trying Settings… ${manualMsg}` };
-    }
     if (platform === "ios" && openIosUrlFallback()) {
-      return { result: "opened", message: `Trying Settings… ${manualMsg}` };
+      return { result: "opened", message: locationSettingsUserMessage(target) };
     }
     return { result: "manual", message: manualMsg };
   }
 
   if (detectPlatform() === "android" && openAndroidIntentFallback(target)) {
-    return { result: "opened", message: `Trying Settings… ${manualMsg}` };
+    return { result: "opened", message: locationSettingsUserMessage(target) };
   }
 
   if (await promptBrowserLocation()) {
