@@ -1168,7 +1168,6 @@ export default function LiveIncidentPage() {
     try {
       const { result, message, lat, lng } = await requestLocationAccess({
         permissionHint: locationPermission,
-        preferAppPermissions: isJoinerMode && locationPermission === "prompt",
       });
       if (result === "granted") {
         const incId = currentIncidentId;
