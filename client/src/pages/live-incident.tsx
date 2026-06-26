@@ -65,6 +65,7 @@ import {
 } from "@/components/live-incident-navigation";
 import { probePanicLocation } from "@/lib/panic-send";
 import { acquirePanicLocation, hasPanicCoordinates } from "@/lib/panic-location";
+import { requestLocationAccess } from "@/lib/request-location-access";
 
 const LIVE_INCIDENT_KEY = "omt_live_incident_id";
 
@@ -642,6 +643,7 @@ export default function LiveIncidentPage() {
   // guide shown when a joiner taps Navigate with location off.
   const [acquiringJoinerGps, setAcquiringJoinerGps] = useState(false);
   const [joinerGpsBlocked, setJoinerGpsBlocked] = useState(false);
+  const [mapLocationRequesting, setMapLocationRequesting] = useState(false);
   // Mirrors navMode so interval callbacks (startStepTracking) always read the latest value.
   const navModeRef = useRef(false);
   // Guards the one-shot nav-mode auto-resume after PWA reopen / app kill.
@@ -802,6 +804,17 @@ export default function LiveIncidentPage() {
   }, [joinedId, isJoinerMode, currentIncident?.id, joinerNavDestination?.lat, joinerNavDestination?.lng, mapsReady, nativeMapStatus, isNative]);
   /** Live incident active but not in full-screen nav — pin map between header and footer. */
   const pinnedFieldLayout = Boolean(currentIncident && !navMode && !showArrivalForm);
+  const mapLocationBlocked =
+    locationPermission === "denied" || gpsStatus === "denied";
+  const showMapLocationGate =
+    pinnedFieldLayout
+    && !userLoc
+    && (
+      mapLocationBlocked
+      || locationPermission === "prompt"
+      || gpsStatus === "unavailable"
+      || gpsStatus === "acquiring"
+    );
 
   const destinationSheetGps = useMemo(
     () => resolveFieldGpsCoords(currentIncident, userLoc),
@@ -1148,6 +1161,27 @@ export default function LiveIncidentPage() {
     stopGpsFallbackTracking();
     lastPosRef.current = null;
     trackingStartedAtRef.current = 0;
+  }
+
+  async function handleRequestMapLocation() {
+    if (mapLocationRequesting) return;
+    setMapLocationRequesting(true);
+    try {
+      const { result, message } = await requestLocationAccess();
+      if (result === "granted") {
+        const incId = currentIncidentId;
+        if (incId != null) startTracking(incId);
+        toast({ title: "Location on", description: message });
+        return;
+      }
+      toast({
+        title: result === "denied" ? "Location blocked" : "Turn on GPS",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setMapLocationRequesting(false);
+    }
   }
 
   function startTracking(incidentId: number) {
@@ -4680,76 +4714,53 @@ export default function LiveIncidentPage() {
               />
             )}
 
-            {/* Location denied overlay */}
-            {(locationPermission === "denied" || gpsStatus === "denied") && (
+            {/* Location gate — prompt permission or open phone Settings (same as panic SOS). */}
+            {showMapLocationGate && (
               <div
                 className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 backdrop-blur-sm z-10 px-6 text-center"
-                data-testid="map-overlay-location-denied"
-              >
-                <div className="h-12 w-12 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
-                  <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
-                </div>
-                <div className="space-y-1">
-                  <p className="font-semibold text-sm">Location access is blocked</p>
-                  <p className="text-xs text-muted-foreground max-w-xs">
-                    GPS tracking won't work until you re-enable location for this app.
-                  </p>
-                </div>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-                      data-testid="button-map-location-help"
-                    >
-                      <HelpCircle className="h-3.5 w-3.5" />
-                      How to fix this
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-4 space-y-2 text-sm" data-testid="popover-map-location-help">
-                    <p className="font-semibold">Re-enable Location</p>
-                    <p className="text-xs text-muted-foreground">
-                      {/iPad|iPhone|iPod/.test(navigator.userAgent)
-                        ? "Settings → Privacy & Security → Location Services → find your browser → set to \"While Using\"."
-                        : isNative
-                        ? "Settings → Apps → OMT Pulse → Permissions → Location → Allow (or \"Allow all the time\" for background tracking)."
-                        : /Android/i.test(navigator.userAgent)
-                        ? "Settings → Apps → Chrome → Permissions → Location → Allow."
-                        : "Click the lock icon in your browser's address bar → Site settings → Location → Allow."}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Once granted, return here — the map will restore automatically.</p>
-                  </PopoverContent>
-                </Popover>
-              </div>
-            )}
-
-            {/* Location prompt overlay — shown when location has never been asked */}
-            {locationPermission === "prompt" && (
-              <div
-                className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm z-10 px-6 text-center"
                 data-testid="map-overlay-location-prompt"
               >
-                <div className="h-12 w-12 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
-                  <Navigation className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                <div
+                  className={cn(
+                    "h-12 w-12 rounded-full flex items-center justify-center",
+                    mapLocationBlocked
+                      ? "bg-red-100 dark:bg-red-900/40"
+                      : "bg-amber-100 dark:bg-amber-900/40",
+                  )}
+                >
+                  {mapLocationBlocked ? (
+                    <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
+                  ) : (
+                    <Navigation className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <p className="font-semibold text-sm">Location needed</p>
+                  <p className="font-semibold text-sm">
+                    {mapLocationBlocked ? "Location access is blocked" : "Location needed"}
+                  </p>
                   <p className="text-xs text-muted-foreground max-w-xs">
-                    Allow location access so OMT can track your GPS during a live incident.
+                    {mapLocationBlocked
+                      ? "Allow Location for OMT Pulse in your phone settings so dispatch can track you during this incident."
+                      : "Turn on GPS and allow location access so OMT can track your position during this live incident."}
                   </p>
                 </div>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="text-xs border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-                  onClick={() => {
-                    if (navigator.geolocation) {
-                      navigator.geolocation.getCurrentPosition(() => {}, () => {}, { timeout: 10000 });
-                    }
-                  }}
+                  className={cn(
+                    "text-xs font-semibold",
+                    mapLocationBlocked
+                      ? "border-red-500/40 text-red-700 dark:text-red-400 hover:bg-red-500/10"
+                      : "border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
+                  )}
+                  disabled={mapLocationRequesting}
+                  onClick={() => { void handleRequestMapLocation(); }}
                   data-testid="button-map-allow-location"
                 >
-                  Allow Location
+                  {mapLocationRequesting ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : null}
+                  {mapLocationBlocked ? "Open Settings" : "Allow Location"}
                 </Button>
               </div>
             )}
