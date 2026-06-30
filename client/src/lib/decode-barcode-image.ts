@@ -200,3 +200,24 @@ export function createHtml5FileScanner(elementId: string): Html5Qrcode {
     formatsToSupport: PDF417_FORMATS,
   });
 }
+
+/** Capture the current video preview frame as JPEG (matches what the user framed). */
+export function captureVideoFrameAsJpeg(
+  video: HTMLVideoElement,
+  quality = 0.92,
+): Promise<Blob | null> {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  if (!width || !height) return Promise.resolve(null);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.resolve(null);
+  ctx.drawImage(video, 0, 0, width, height);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+  });
+}
