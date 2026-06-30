@@ -352,3 +352,17 @@ html.capacitor-native #cap-live-map {
 .ops-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Native ML Kit licence scan — camera renders behind the WebView */
+body.barcode-scanner-active {
+  visibility: hidden;
+  background: transparent !important;
+}
+
+body.barcode-scanner-active .barcode-scanner-modal {
+  visibility: visible;
+}
+
+.barcode-scanner-modal {
+  background: transparent !important;
+}
