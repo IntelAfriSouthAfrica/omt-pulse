@@ -23,6 +23,11 @@ import {
   type ZxingLiveHit,
   type ZxingScanMode,
 } from "@/lib/zxing-live-scanner";
+import {
+  canUseNativeLicenceScanner,
+  scanDriversLicenceNative,
+  stopNativeDriversLicenceScan,
+} from "@/lib/native-licence-barcode";
 import { openOmtAppDetailsSettings } from "@/lib/omt-app-settings";
 import { APP_CACHE_VERSION } from "@shared/cache-version";
 import {
@@ -49,6 +54,23 @@ const ID_1D_SETTLE_MS = 1_800;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function videoFrameToBlob(video: HTMLVideoElement): Promise<Blob | null> {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  if (!width || !height) return Promise.resolve(null);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.resolve(null);
+  ctx.drawImage(video, 0, 0, width, height);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92);
+  });
 }
 
 /** Drop stale service-worker caches and native overlay state left by old builds. */
@@ -149,6 +171,7 @@ export function BarcodeScanner({
       /* ignore */
     }
     zxingRef.current = null;
+    void stopNativeDriversLicenceScan();
     setScanning(false);
   }, []);
 
@@ -297,14 +320,14 @@ export function BarcodeScanner({
 
       try {
         if (isLicenceMode) {
-          const hit = await decodeZxingFromFile(file, mode);
-          if (hit?.kind === "licence_bytes") {
-            await finishLicenceBytes(hit.bytes);
-            return;
-          }
           const parsed = await decodeDriversLicenceFromImageViaApi(file);
           if (parsed?.personIdNumber || parsed?.personFullName) {
             settleSuccess({ kind: "parsed", parsed });
+            return;
+          }
+          const hit = await decodeZxingFromFile(file, mode);
+          if (hit?.kind === "licence_bytes") {
+            await finishLicenceBytes(hit.bytes);
             return;
           }
         } else {
@@ -357,14 +380,27 @@ export function BarcodeScanner({
         settleSuccess(hit.text);
         return;
       }
-      showManualEntry("Could not read the barcode. Adjust lighting and try again.");
+
+      if (isLicenceMode) {
+        setStatus("Sending frame to server…");
+        const blob = await videoFrameToBlob(video);
+        if (blob) {
+          const parsed = await decodeDriversLicenceFromImageViaApi(blob);
+          if (parsed?.personIdNumber || parsed?.personFullName) {
+            settleSuccess({ kind: "parsed", parsed });
+            return;
+          }
+        }
+      }
+
+      showManualEntry("Could not read the barcode. Remove sleeve, avoid glare, and try Take photo.");
     } catch {
       showManualEntry();
     } finally {
       busyRef.current = false;
       setPhotoBusy(false);
     }
-  }, [finishLicenceBytes, mode, settleSuccess, showManualEntry]);
+  }, [finishLicenceBytes, isLicenceMode, mode, settleSuccess, showManualEntry]);
 
   useEffect(() => {
     if (!open) {
@@ -397,8 +433,11 @@ export function BarcodeScanner({
     setError(null);
 
     if (isLicenceMode) {
+      const native = canUseNativeLicenceScanner();
       setHint(
-        `ZXing live scan (${APP_CACHE_VERSION}) — centre the large PDF417 on the back of the card.`,
+        native
+          ? `Hold the back of the card — PDF417 on the right. Remove sleeve, avoid glare (${APP_CACHE_VERSION}).`
+          : `Centre the large PDF417 on the back of the card (${APP_CACHE_VERSION}).`,
       );
     } else if (scanKind === "id") {
       setHint(`Hold Smart ID or ID book in the green frame (${APP_CACHE_VERSION}).`);
@@ -410,7 +449,34 @@ export function BarcodeScanner({
 
     void (async () => {
       await delay(400);
-      if (!cancelled) await startZxingLive();
+      if (cancelled || settledRef.current) return;
+
+      if (isLicenceMode && canUseNativeLicenceScanner()) {
+        try {
+          setScanning(true);
+          setStatus("Scanning back of card — hold steady, PDF417 on the right.");
+          const result = await scanDriversLicenceNative("live");
+          if (cancelled || settledRef.current) return;
+
+          if (result.ok) {
+            settleSuccess({ kind: "parsed", parsed: result.parsed });
+            return;
+          }
+
+          if (result.reason === "permission") {
+            setPermissionBlocked(true);
+            setError("Camera blocked — allow Camera in app settings.");
+            setStatus(null);
+            return;
+          }
+        } catch {
+          /* fall through to ZXing */
+        }
+      }
+
+      if (!cancelled && !settledRef.current) {
+        await startZxingLive();
+      }
     })();
 
     const timeout = window.setTimeout(
@@ -432,6 +498,7 @@ export function BarcodeScanner({
     isLicenceMode,
     open,
     scanKind,
+    settleSuccess,
     startZxingLive,
     stopLiveScan,
   ]);
@@ -445,7 +512,10 @@ export function BarcodeScanner({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden" hideDefaultClose>
+      <DialogContent
+        className={`max-w-sm p-0 gap-0 overflow-hidden${isLicenceMode ? " barcode-scanner-modal" : ""}`}
+        hideDefaultClose
+      >
         <input
           ref={cameraInputRef}
           type="file"

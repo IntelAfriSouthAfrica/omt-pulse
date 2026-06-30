@@ -11,22 +11,25 @@ import { isSadlEncryptedPayload } from "./sa-drivers-licence";
 type CropRegion = { x: number; y: number; w: number; h: number };
 
 /**
- * PDF417 on the SA driver's licence sits in the upper portion of the card.
- * We try progressively wider crops so an off-centre photo still decodes.
+ * PDF417 on the SA driver's licence back sits along the right edge.
+ * Try progressively wider crops so an off-centre photo still decodes.
  */
 const CROP_REGIONS: CropRegion[] = [
-  { x: 0.02, y: 0.0, w: 0.96, h: 0.4 },
-  { x: 0.04, y: 0.02, w: 0.92, h: 0.46 },
-  { x: 0.0, y: 0.0, w: 1.0, h: 0.55 },
+  { x: 0.5, y: 0.03, w: 0.47, h: 0.94 },
+  { x: 0.38, y: 0.03, w: 0.6, h: 0.94 },
+  { x: 0.22, y: 0.03, w: 0.76, h: 0.94 },
   { x: 0.0, y: 0.0, w: 1.0, h: 1.0 },
 ];
 
-type PreprocessMode = "default" | "grayscale" | "high_contrast" | "threshold";
+const ROTATIONS = [0, 90, 180, 270] as const;
+
+type PreprocessMode = "default" | "grayscale" | "high_contrast" | "threshold" | "linear";
 
 const PREPROCESS_MODES: PreprocessMode[] = [
-  "default",
   "grayscale",
+  "default",
   "high_contrast",
+  "linear",
   "threshold",
 ];
 
@@ -38,6 +41,8 @@ const READER_OPTIONS: ReaderOptions = {
   tryDownscale: true,
   maxNumberOfSymbols: 1,
 };
+
+const MAX_DECODE_WIDTH = 2000;
 
 let wasmConfigured = false;
 
@@ -95,11 +100,9 @@ function sadlBytesFromText(text: string): Uint8Array | null {
 
 function sadlBytesFromResultBytes(raw: Uint8Array | undefined): Uint8Array | null {
   if (!raw) return null;
-  // zxing-cpp returns the raw codeword bytes; SADL is exactly 720.
   if (raw.length === 720 && isSadlEncryptedPayload(raw)) {
     return new Uint8Array(raw);
   }
-  // Some readers append trailing padding — trim to 720 and re-check.
   if (raw.length > 720) {
     const trimmed = raw.subarray(0, 720);
     if (isSadlEncryptedPayload(trimmed)) return new Uint8Array(trimmed);
@@ -112,7 +115,7 @@ async function rgbaForCrop(
   crop: CropRegion,
   mode: PreprocessMode,
 ): Promise<{ data: Uint8ClampedArray; width: number; height: number } | null> {
-  const meta = await sharp(imageBuffer).rotate().metadata();
+  const meta = await sharp(imageBuffer).metadata();
   const fullW = meta.width ?? 0;
   const fullH = meta.height ?? 0;
   if (fullW < 4 || fullH < 4) return null;
@@ -122,22 +125,23 @@ async function rgbaForCrop(
   const width = Math.max(1, Math.min(fullW - left, Math.floor(fullW * crop.w)));
   const height = Math.max(1, Math.min(fullH - top, Math.floor(fullH * crop.h)));
 
-  let pipeline = sharp(imageBuffer).rotate().extract({ left, top, width, height });
+  let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
 
-  // Upscale small crops so the dense PDF417 has enough pixels per module.
-  if (width < 1400) {
+  if (width < 1200) {
     pipeline = pipeline.resize({
-      width: Math.min(2200, Math.round(width * (2200 / Math.max(width, 1)))),
+      width: Math.min(MAX_DECODE_WIDTH, Math.round(width * (MAX_DECODE_WIDTH / Math.max(width, 1)))),
       withoutEnlargement: false,
     });
   }
 
   if (mode === "grayscale") {
-    pipeline = pipeline.grayscale().normalize();
+    pipeline = pipeline.grayscale().normalize().sharpen();
   } else if (mode === "high_contrast") {
     pipeline = pipeline.grayscale().normalize().sharpen().linear(1.4, -45);
+  } else if (mode === "linear") {
+    pipeline = pipeline.grayscale().normalize().linear(1.6, -60);
   } else if (mode === "threshold") {
-    pipeline = pipeline.grayscale().normalize().median(1).threshold(140);
+    pipeline = pipeline.grayscale().normalize().median(1).threshold(128);
   } else {
     pipeline = pipeline.normalize().sharpen();
   }
@@ -187,13 +191,27 @@ export async function decodeSadlBytesFromImageBuffer(
 ): Promise<Uint8Array | null> {
   ensureZxingWasm();
 
-  for (const crop of CROP_REGIONS) {
-    try {
-      const bytes = await decodeCrop(imageBuffer, crop);
-      if (bytes) return bytes;
-    } catch {
-      /* try next crop */
+  const oriented = await sharp(imageBuffer).rotate().toBuffer();
+
+  for (const rot of ROTATIONS) {
+    let working = oriented;
+    if (rot !== 0) {
+      try {
+        working = await sharp(oriented).rotate(rot).toBuffer();
+      } catch {
+        continue;
+      }
+    }
+
+    for (const crop of CROP_REGIONS) {
+      try {
+        const bytes = await decodeCrop(working, crop);
+        if (bytes) return bytes;
+      } catch {
+        /* try next crop */
+      }
     }
   }
+
   return null;
 }
