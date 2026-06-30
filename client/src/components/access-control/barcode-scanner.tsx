@@ -13,6 +13,11 @@ import {
   pickBestBarcodePayload,
 } from "@/lib/pick-best-barcode";
 import { decodeDriversLicenceFromImageViaApi } from "@/lib/decode-drivers-licence-api";
+import {
+  canUseNativeLicenceScanner,
+  scanDriversLicenceNative,
+  stopNativeDriversLicenceScan,
+} from "@/lib/native-licence-barcode";
 import type { AccessIdentityScanResult } from "@/lib/parse-sa-barcodes";
 import {
   captureVideoFrameAsJpeg,
@@ -130,6 +135,7 @@ export function BarcodeScanner({
   onScan,
 }: BarcodeScannerProps) {
   const isLicenceOnlyMode = scanKind === "id" && identityMode === "drivers_licence";
+  const isNativeLicenceMode = isLicenceOnlyMode && canUseNativeLicenceScanner();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
@@ -155,6 +161,7 @@ export function BarcodeScanner({
   const [photoScanning, setPhotoScanning] = useState(false);
   const [licencePhotoRequired, setLicencePhotoRequired] = useState(false);
   const [showManualFallback, setShowManualFallback] = useState(false);
+  const [nativeScanning, setNativeScanning] = useState(false);
 
   openRef.current = open;
 
@@ -184,6 +191,45 @@ export function BarcodeScanner({
     setError(message);
     setStatus(null);
   }, []);
+
+  const finishNativeLicenceScan = useCallback(
+    async (mode: "auto" | "google" | "live" = "auto") => {
+      if (decodeBusyRef.current || settledRef.current) return;
+      decodeBusyRef.current = true;
+      setNativeScanning(true);
+      setError(null);
+      setShowManualFallback(false);
+      setHint("Hold the back of the driver's licence steady — large PDF417 in the green frame.");
+      setStatus("Scanning… point at the barcode on the back of the card.");
+
+      try {
+        const result = await scanDriversLicenceNative(mode);
+        if (settledRef.current) return;
+
+        if (result.ok) {
+          settledRef.current = true;
+          onScan({ kind: "parsed", parsed: result.parsed });
+          onOpenChange(false);
+          return;
+        }
+
+        if (result.reason === "cancelled") {
+          setStatus("Tap Scan again when ready.");
+          return;
+        }
+
+        const message =
+          result.reason === "decode_failed"
+            ? "Barcode detected but could not be read. Try again with better light and a steady hand."
+            : "Could not read the licence barcode. Tap Scan again and centre the large PDF417 on the back of the card.";
+        showManualEntryFallback(message);
+      } finally {
+        decodeBusyRef.current = false;
+        setNativeScanning(false);
+      }
+    },
+    [onOpenChange, onScan, showManualEntryFallback],
+  );
 
   const finishDriversLicenceFromImage = useCallback(
     async (image: Blob) => {
@@ -469,20 +515,44 @@ export function BarcodeScanner({
   );
 
   useEffect(() => {
+    if (!open || !isNativeLicenceMode) return;
+
+    let cancelled = false;
+    settledRef.current = false;
+
+    void (async () => {
+      await delay(200);
+      if (!cancelled) await finishNativeLicenceScan("auto");
+    })();
+
+    return () => {
+      cancelled = true;
+      void stopNativeDriversLicenceScan();
+      setNativeScanning(false);
+    };
+  }, [open, isNativeLicenceMode, finishNativeLicenceScan]);
+
+  useEffect(() => {
     if (!open) {
       stopCamera();
+      void stopNativeDriversLicenceScan();
       setError(null);
       setManual("");
       setHint(null);
       setStatus(null);
       setPermissionBlocked(false);
       setPhotoScanning(false);
+      setNativeScanning(false);
       setLicencePhotoRequired(false);
       setShowManualFallback(false);
       pickerActiveRef.current = false;
       licenceHintShownRef.current = false;
       samplesRef.current = [];
       settledRef.current = false;
+      return;
+    }
+
+    if (isNativeLicenceMode) {
       return;
     }
 
@@ -636,6 +706,7 @@ export function BarcodeScanner({
   }, [
     acceptSmartIdImmediately,
     isLicenceOnlyMode,
+    isNativeLicenceMode,
     open,
     recordDiscHits,
     recordIdentityHits,
@@ -693,7 +764,14 @@ export function BarcodeScanner({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden" hideDefaultClose>
+      <DialogContent
+        className={
+          isNativeLicenceMode
+            ? "barcode-scanner-modal native-licence-scanner-overlay max-w-sm p-0 gap-0 overflow-hidden bg-transparent border-0 shadow-none"
+            : "max-w-sm p-0 gap-0 overflow-hidden"
+        }
+        hideDefaultClose
+      >
         <div id={HIDDEN_SCANNER_ID} aria-hidden className="fixed -left-[9999px] h-1 w-1" />
         <input
           ref={cameraInputRef}
@@ -736,7 +814,16 @@ export function BarcodeScanner({
           </DialogTitle>
         </DialogHeader>
         <div className="relative aspect-[4/3] bg-black overflow-hidden">
-          {isLicenceOnlyMode ? (
+          {isNativeLicenceMode ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center text-white bg-black/30">
+              <ScanLine className={`h-12 w-12 text-primary ${nativeScanning ? "animate-pulse" : ""}`} />
+              <p className="text-sm font-medium">Live licence scan</p>
+              <p className="text-xs text-white/80">
+                Hold the back of the card in the green frame — same as Smart ID, but uses the native scanner.
+              </p>
+              <div className="pointer-events-none absolute inset-6 border-2 border-primary rounded-lg" />
+            </div>
+          ) : isLicenceOnlyMode ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center text-white">
               <Camera className="h-12 w-12 text-primary opacity-90" />
               <p className="text-sm font-medium">Driver&apos;s licence photo</p>
@@ -774,6 +861,19 @@ export function BarcodeScanner({
             </p>
           )}
           <div className="flex gap-2">
+            {isNativeLicenceMode ? (
+              <Button
+                type="button"
+                variant="default"
+                className="flex-1"
+                disabled={nativeScanning}
+                onClick={() => void finishNativeLicenceScan("auto")}
+              >
+                <ScanLine className="h-4 w-4 mr-1" />
+                {nativeScanning ? "Scanning…" : "Scan again"}
+              </Button>
+            ) : (
+              <>
             <Button
               type="button"
               variant={isLicenceOnlyMode || licencePhotoRequired ? "default" : "outline"}
@@ -804,6 +904,8 @@ export function BarcodeScanner({
               <ImageIcon className="h-4 w-4 mr-1" />
               Gallery
             </Button>
+              </>
+            )}
             {permissionBlocked && (
               <Button
                 type="button"
@@ -816,7 +918,7 @@ export function BarcodeScanner({
               </Button>
             )}
           </div>
-          {scanKind === "id" && showManualFallback && (
+          {scanKind === "id" && showManualFallback && !isNativeLicenceMode && (
             <>
               <input
                 type="text"
@@ -832,7 +934,7 @@ export function BarcodeScanner({
             </>
           )}
           <div className="flex gap-2">
-            {scanKind === "id" && showManualFallback && (
+            {scanKind === "id" && showManualFallback && !isNativeLicenceMode && (
               <Button
                 type="button"
                 className="flex-1"

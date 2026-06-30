@@ -219,8 +219,8 @@ export function AccessEntryForm({ destinations, onCreated }: AccessEntryFormProp
           </div>
         </div>
         <p className="text-xs text-muted-foreground -mt-1">
-          Use <span className="font-medium">Scan ID</span> for Smart ID. Use{" "}
-          <span className="font-medium">Scan licence</span> for driver&apos;s licence (photo only).
+          Use <span className="font-medium">Scan ID</span> for Smart ID.{" "}
+          <span className="font-medium">Scan licence</span> uses live native scanning on the app (install latest APK).
         </p>
         {licenceScanNote && (
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/40 px-3 py-2">
