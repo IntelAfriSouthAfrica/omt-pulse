@@ -130,15 +130,37 @@ export function registerAccessControlRoutes(app: Express) {
       return res.status(400).json({ message: "Image too small or too large" });
     }
 
-    const sadlBytes = await decodeSadlBytesFromImageBuffer(imageBuffer);
+    const startedAt = Date.now();
+    let sadlBytes: Uint8Array | null = null;
+    try {
+      sadlBytes = await decodeSadlBytesFromImageBuffer(imageBuffer);
+    } catch (err) {
+      console.error(
+        "[sadl-image] decode threw:",
+        err instanceof Error ? err.message : err,
+      );
+      return res
+        .status(500)
+        .json({ message: "Server error while reading driver's licence image" });
+    }
+
     if (!sadlBytes) {
+      console.warn(
+        `[sadl-image] no PDF417 found — imageBytes=${imageBuffer.length} ms=${Date.now() - startedAt}`,
+      );
       return res.status(422).json({ message: "No driver's licence PDF417 found in image" });
     }
 
     const dl = parseSaDriversLicenceBytes(sadlBytes, true);
     if (!dl) {
+      console.warn(
+        `[sadl-image] PDF417 read (${sadlBytes.length} bytes) but decrypt/parse failed`,
+      );
       return res.status(422).json({ message: "Could not decode driver licence barcode" });
     }
+    console.log(
+      `[sadl-image] success — id=${dl.idNumber ? "yes" : "no"} name=${dl.surname ? "yes" : "no"} ms=${Date.now() - startedAt}`,
+    );
     res.json(dl);
   });
 
