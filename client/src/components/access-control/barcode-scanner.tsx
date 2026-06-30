@@ -87,7 +87,7 @@ export function BarcodeScanner({
   onScan,
 }: BarcodeScannerProps) {
   const isLicenceMode = scanKind === "id" && identityMode === "drivers_licence";
-  const useNativeLicence = isLicenceMode && canUseNativeLicenceScanner();
+  const canNativeLicence = isLicenceMode && canUseNativeLicenceScanner();
   const mode = zxingMode(scanKind, identityMode);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -260,7 +260,8 @@ export function BarcodeScanner({
     setNativeScanning(true);
     setError(null);
     setShowManualFallback(false);
-    setStatus("Scanning… point at the barcode on the back of the card.");
+    setStatus("Opening Google scanner… point at the barcode on the back of the card.");
+    stopLiveScan();
 
     try {
       const result = await scanDriversLicenceNative("auto");
@@ -272,17 +273,19 @@ export function BarcodeScanner({
       }
 
       if (result.reason === "cancelled") {
-        setStatus("Tap Scan again when ready.");
+        setStatus("Scanning… hold the barcode steady in the green frame.");
+        void startZxingLive();
         return;
       }
 
       setPhotoOffered(true);
-      setStatus("Having trouble reading this barcode — try Take photo.");
+      setStatus("Google scanner could not read this — live scan or Take photo.");
+      void startZxingLive();
     } finally {
       busyRef.current = false;
       setNativeScanning(false);
     }
-  }, [settleSuccess]);
+  }, [settleSuccess, startZxingLive, stopLiveScan]);
 
   const decodePhotoFile = useCallback(
     async (file: File) => {
@@ -395,22 +398,15 @@ export function BarcodeScanner({
 
     let cancelled = false;
 
-    if (useNativeLicence) {
-      void (async () => {
-        await delay(200);
-        if (!cancelled) await runNativeLicenceScan();
-      })();
-    } else {
-      void (async () => {
-        await delay(250);
-        if (!cancelled) await startZxingLive();
-      })();
-    }
+    void (async () => {
+      await delay(250);
+      if (!cancelled) await startZxingLive();
+    })();
 
     const timeout = window.setTimeout(() => {
       if (cancelled || settledRef.current) return;
       setPhotoOffered(true);
-      setStatus("Having trouble reading this barcode — try Take photo.");
+      setStatus("Having trouble reading this barcode — try Take photo or Google scanner.");
     }, LIVE_SCAN_TIMEOUT_MS);
 
     return () => {
@@ -422,11 +418,9 @@ export function BarcodeScanner({
   }, [
     isLicenceMode,
     open,
-    runNativeLicenceScan,
     scanKind,
     startZxingLive,
     stopLiveScan,
-    useNativeLicence,
   ]);
 
   const closeForManualEntry = useCallback(() => {
@@ -435,18 +429,10 @@ export function BarcodeScanner({
   }, [onOpenChange, stopLiveScan]);
 
   const showPhotoActions = photoOffered || showManualFallback || permissionBlocked;
-  const showLivePreview = !useNativeLicence;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className={
-          useNativeLicence
-            ? "barcode-scanner-modal native-licence-scanner-overlay max-w-sm p-0 gap-0 overflow-hidden bg-transparent border-0 shadow-none"
-            : "max-w-sm p-0 gap-0 overflow-hidden"
-        }
-        hideDefaultClose
-      >
+      <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden" hideDefaultClose>
         <input
           ref={cameraInputRef}
           type="file"
@@ -479,26 +465,16 @@ export function BarcodeScanner({
         </DialogHeader>
 
         <div className="relative aspect-[4/3] bg-black overflow-hidden">
-          {showLivePreview ? (
-            <>
-              <video
-                ref={videoRef}
-                className="h-full w-full object-cover"
-                playsInline
-                muted
-                autoPlay
-              />
-              {!scanning && !error && (
-                <div className="absolute inset-0 flex items-center justify-center text-white text-sm px-6 text-center">
-                  Starting camera…
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center text-white bg-black/30">
-              <ScanLine className={`h-12 w-12 text-primary ${nativeScanning ? "animate-pulse" : ""}`} />
-              <p className="text-sm font-medium">Live licence scan</p>
-              <p className="text-xs text-white/80">Native scanner — hold the barcode steady.</p>
+          <video
+            ref={videoRef}
+            className="h-full w-full object-cover"
+            playsInline
+            muted
+            autoPlay
+          />
+          {!scanning && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-white text-sm px-6 text-center">
+              Starting camera…
             </div>
           )}
           <div className="pointer-events-none absolute inset-6 border-2 border-primary rounded-lg" />
@@ -516,18 +492,7 @@ export function BarcodeScanner({
           )}
 
           <div className="flex gap-2">
-            {useNativeLicence ? (
-              <Button
-                type="button"
-                variant="default"
-                className="flex-1"
-                disabled={nativeScanning}
-                onClick={() => void runNativeLicenceScan()}
-              >
-                <ScanLine className="h-4 w-4 mr-1" />
-                {nativeScanning ? "Scanning…" : "Scan again"}
-              </Button>
-            ) : showPhotoActions ? (
+            {showPhotoActions ? (
               <>
                 <Button
                   type="button"
@@ -560,6 +525,19 @@ export function BarcodeScanner({
               >
                 <Camera className="h-4 w-4 mr-1" />
                 Capture frame
+              </Button>
+            )}
+            {canNativeLicence && (
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={nativeScanning || photoBusy}
+                onClick={() => void runNativeLicenceScan()}
+                title="Opens Google's full-screen barcode scanner"
+              >
+                <ScanLine className="h-4 w-4 mr-1" />
+                {nativeScanning ? "Google…" : "Google scan"}
               </Button>
             )}
             {permissionBlocked && (
