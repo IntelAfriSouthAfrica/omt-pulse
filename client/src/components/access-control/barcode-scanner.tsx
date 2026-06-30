@@ -13,12 +13,12 @@ import {
   pickBestBarcodePayload,
 } from "@/lib/pick-best-barcode";
 import { looksLikeSadlEncryptedString } from "@shared/sa-drivers-licence";
-import { decodeDriversLicenceViaApi } from "@/lib/decode-drivers-licence-api";
+import { decodeDriversLicenceFromImageViaApi, decodeDriversLicenceViaApi } from "@/lib/decode-drivers-licence-api";
 import type { AccessIdentityScanResult } from "@/lib/parse-sa-barcodes";
 import {
+  captureVideoFrameAsJpeg,
   createHtml5FileScanner,
   decodeBarcodesFromFile,
-  decodeSadlFromFile,
 } from "@/lib/decode-barcode-image";
 import { openOmtAppDetailsSettings } from "@/lib/omt-app-settings";
 import {
@@ -133,6 +133,37 @@ export function BarcodeScanner({
     return fileScannerRef.current;
   }, []);
 
+  const finishDriversLicenceFromImage = useCallback(
+    async (image: Blob) => {
+      if (decodeBusyRef.current || settledRef.current) return;
+      decodeBusyRef.current = true;
+      settledRef.current = true;
+      stopCamera();
+      setStatus("Reading driver's licence…");
+      setError(null);
+      try {
+        const parsed = await decodeDriversLicenceFromImageViaApi(image);
+        if (!parsed?.personIdNumber && !parsed?.personFullName) {
+          settledRef.current = false;
+          setStatus(null);
+          setError("Could not read driver's licence — centre the PDF417 in the frame and capture again.");
+          if (isLicencePhotoMode) void startLiveCameraRef.current?.();
+          return;
+        }
+        onScan({ kind: "parsed", parsed });
+        onOpenChange(false);
+      } catch {
+        settledRef.current = false;
+        setStatus(null);
+        setError("Could not read driver's licence — check your connection and try again.");
+        if (isLicencePhotoMode) void startLiveCameraRef.current?.();
+      } finally {
+        decodeBusyRef.current = false;
+      }
+    },
+    [isLicencePhotoMode, onOpenChange, onScan, stopCamera],
+  );
+
   const finishDriversLicence = useCallback(
     async (rawLatin1: string) => {
       if (decodeBusyRef.current || settledRef.current) return;
@@ -242,18 +273,35 @@ export function BarcodeScanner({
     [tryAcceptDiscScan],
   );
 
-  const decodeLicenceFromPhoto = useCallback(
-    async (file: File): Promise<boolean> => {
-      const scanner = ensureFileScanner();
-      const raw = await decodeSadlFromFile(file, scanner);
-      if (raw && looksLikeSadlEncryptedString(raw)) {
-        await finishDriversLicence(raw);
-        return true;
-      }
-      return false;
+  const decodeLicenceFromImage = useCallback(
+    async (image: Blob) => {
+      await finishDriversLicenceFromImage(image);
     },
-    [ensureFileScanner, finishDriversLicence],
+    [finishDriversLicenceFromImage],
   );
+
+  const captureLicenceFromPreview = useCallback(async () => {
+    if (photoScanning || settledRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) {
+      setError("Camera not ready — wait a moment and try again.");
+      return;
+    }
+    setPhotoScanning(true);
+    setError(null);
+    setStatus("Capturing licence barcode…");
+    try {
+      const frame = await captureVideoFrameAsJpeg(video);
+      if (!frame) {
+        setError("Could not capture image — try Gallery instead.");
+        setStatus(null);
+        return;
+      }
+      await decodeLicenceFromImage(frame);
+    } finally {
+      if (!settledRef.current) setPhotoScanning(false);
+    }
+  }, [decodeLicenceFromImage, photoScanning]);
 
   const pauseForPicker = useCallback(() => {
     pickerActiveRef.current = true;
@@ -299,7 +347,11 @@ export function BarcodeScanner({
       );
       try {
         const ok = isLicencePhotoMode
-          ? await decodeLicenceFromPhoto(file)
+          ? await (async () => {
+              const before = settledRef.current;
+              await decodeLicenceFromImage(file);
+              return settledRef.current && !before;
+            })()
           : await (async () => {
               const scanner = ensureFileScanner();
               const hits = await decodeBarcodesFromFile(file, scanner);
@@ -332,7 +384,7 @@ export function BarcodeScanner({
       }
     },
     [
-      decodeLicenceFromPhoto,
+      decodeLicenceFromImage,
       ensureFileScanner,
       finishDriversLicence,
       isLicencePhotoMode,
@@ -364,9 +416,9 @@ export function BarcodeScanner({
 
     if (isLicencePhotoMode) {
       setHint(
-        "Line up the large PDF417 on the back of the driver's licence, then tap Take photo or Gallery. Do not use live scan — it can crash the app.",
+        "Line up the large PDF417 on the back of the driver's licence inside the green frame, then tap Capture.",
       );
-      setStatus("Preview only — capture a sharp photo to read the licence.");
+      setStatus("Hold steady, then tap Capture when the PDF417 fills the frame.");
     } else if (scanKind === "id") {
       setHint(
         "For Smart ID: fill the green frame with the large square PDF417 on the back. For driver's licence, use Scan licence instead.",
@@ -549,10 +601,13 @@ export function BarcodeScanner({
               variant={isLicencePhotoMode ? "default" : "outline"}
               className="flex-1"
               disabled={photoScanning}
-              onClick={openCameraPicker}
+              onClick={() => {
+                if (isLicencePhotoMode) void captureLicenceFromPreview();
+                else openCameraPicker();
+              }}
             >
               <Camera className="h-4 w-4 mr-1" />
-              {photoScanning ? "Reading…" : "Take photo"}
+              {photoScanning ? "Reading…" : isLicencePhotoMode ? "Capture" : "Take photo"}
             </Button>
             <Button
               type="button"

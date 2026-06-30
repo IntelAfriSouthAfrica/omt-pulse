@@ -13,6 +13,7 @@ import {
   updateDestination,
 } from "./storage";
 import { parseSaDriversLicenceBytes } from "@shared/sa-drivers-licence";
+import { decodeSadlBytesFromImageBuffer } from "@shared/decode-sadl-from-image";
 
 const ACCESS_ROLES = ["administrator", "supervisor", "reporter"] as const;
 
@@ -103,6 +104,38 @@ export function registerAccessControlRoutes(app: Express) {
     }
 
     const dl = parseSaDriversLicenceBytes(new Uint8Array(bytes), true);
+    if (!dl) {
+      return res.status(422).json({ message: "Could not decode driver licence barcode" });
+    }
+    res.json(dl);
+  });
+
+  app.post("/api/access-control/decode-drivers-licence-image", requireAccessRole, async (req, res) => {
+    const bodySchema = z.object({
+      imageBase64: z.string().min(100).max(8_000_000),
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const dataUrl = parsed.data.imageBase64;
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1]! : dataUrl;
+
+    let imageBuffer: Buffer;
+    try {
+      imageBuffer = Buffer.from(base64, "base64");
+    } catch {
+      return res.status(400).json({ message: "Invalid image base64" });
+    }
+    if (imageBuffer.length < 1_000 || imageBuffer.length > 6_000_000) {
+      return res.status(400).json({ message: "Image too small or too large" });
+    }
+
+    const sadlBytes = await decodeSadlBytesFromImageBuffer(imageBuffer);
+    if (!sadlBytes) {
+      return res.status(422).json({ message: "No driver's licence PDF417 found in image" });
+    }
+
+    const dl = parseSaDriversLicenceBytes(sadlBytes, true);
     if (!dl) {
       return res.status(422).json({ message: "Could not decode driver licence barcode" });
     }
