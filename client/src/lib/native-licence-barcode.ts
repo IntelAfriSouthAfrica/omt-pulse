@@ -118,6 +118,12 @@ async function tryMlKitLiveScan(
 
   document.body.classList.add("barcode-scanner-active");
 
+  const handleBarcode = (bc: MlKitBarcode): boolean => {
+    if (signal.cancelled) return false;
+    if (sadlBytesFromMlKitBarcode(bc)) return true;
+    return false;
+  };
+
   return new Promise((resolve) => {
     let settled = false;
     const finish = async (barcode: MlKitBarcode | null) => {
@@ -130,6 +136,10 @@ async function tryMlKitLiveScan(
           await activeListener.remove();
           activeListener = null;
         }
+        if (legacyListener) {
+          await legacyListener.remove();
+          legacyListener = null;
+        }
         await BarcodeScanner.removeAllListeners();
         await BarcodeScanner.stopScan();
       } catch {
@@ -138,27 +148,57 @@ async function tryMlKitLiveScan(
       resolve(barcode);
     };
 
-    const timeout = window.setTimeout(() => void finish(null), 45_000);
+    let legacyListener: { remove: () => Promise<void> } | null = null;
+    const timeout = window.setTimeout(() => void finish(null), 30_000);
 
     void (async () => {
       try {
-        const listener = await BarcodeScanner.addListener("barcodesScanned", (event) => {
-          if (signal.cancelled) return;
-          for (const bc of event.barcodes ?? []) {
-            if (sadlBytesFromMlKitBarcode(bc)) {
+        const onBarcodes = (barcodes: MlKitBarcode[] | undefined) => {
+          for (const bc of barcodes ?? []) {
+            if (handleBarcode(bc)) {
               void finish(bc);
               return;
             }
           }
+        };
+
+        activeListener = await BarcodeScanner.addListener("barcodesScanned", (event) => {
+          onBarcodes(event.barcodes);
         });
-        activeListener = listener;
+
+        // Older plugin builds emit the singular event.
+        legacyListener = await BarcodeScanner.addListener(
+          "barcodeScanned" as "barcodesScanned",
+          (event: { barcode?: MlKitBarcode }) => {
+            if (event.barcode && handleBarcode(event.barcode)) {
+              void finish(event.barcode);
+            }
+          },
+        );
+
+        await BarcodeScanner.addListener("scanError", (event) => {
+          console.warn("[mlkit-licence] scanError:", event.message);
+        });
 
         await BarcodeScanner.startScan({
           formats: [BarcodeFormat.Pdf417],
           resolution: Resolution["1920x1080"],
           lensFacing: LensFacing.Back,
         });
-      } catch {
+
+        try {
+          const torch = await BarcodeScanner.isTorchAvailable();
+          if (torch.available) {
+            await BarcodeScanner.enableTorch();
+          }
+        } catch {
+          /* torch optional */
+        }
+      } catch (err) {
+        console.warn(
+          "[mlkit-licence] startScan failed:",
+          err instanceof Error ? err.message : err,
+        );
         void finish(null);
       }
     })();

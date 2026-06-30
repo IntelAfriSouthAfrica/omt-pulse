@@ -30,8 +30,10 @@ const REAR_CAMERA: MediaStreamConstraints = {
   audio: false,
   video: {
     facingMode: { ideal: "environment" },
-    width: { ideal: 1920, min: 640 },
-    height: { ideal: 1080, min: 480 },
+    width: { ideal: 1920, min: 1280 },
+    height: { ideal: 1080, min: 720 },
+    // @ts-expect-error non-standard but supported on many Android WebViews
+    focusMode: { ideal: "continuous" },
   },
 };
 

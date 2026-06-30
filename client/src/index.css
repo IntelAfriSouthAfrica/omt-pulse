@@ -359,8 +359,24 @@ body.barcode-scanner-active {
   background: transparent !important;
 }
 
+body.barcode-scanner-active [data-radix-dialog-overlay] {
+  background: transparent !important;
+}
+
 body.barcode-scanner-active .barcode-scanner-modal {
   visibility: visible;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+body.barcode-scanner-active .barcode-scanner-viewport {
+  background: transparent !important;
+}
+
+body.barcode-scanner-active .barcode-scanner-chrome {
+  background: hsl(var(--background) / 0.92) !important;
+  backdrop-filter: blur(6px);
 }
 
 .barcode-scanner-modal {
