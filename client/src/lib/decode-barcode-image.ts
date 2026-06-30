@@ -163,6 +163,27 @@ export async function decodeBarcodesFromFile(
   return decodeFromImageSource(img, img.naturalWidth, img.naturalHeight, html5Scanner);
 }
 
+/** SADL-only: html5-qrcode only — BarcodeDetector can crash WebView on 720-byte binary PDF417. */
+export async function decodeSadlFromFile(
+  file: File,
+  html5Scanner: Html5Qrcode | null,
+): Promise<string | null> {
+  if (!html5Scanner) return null;
+  const img = await loadImageFromFile(file);
+  for (const crop of CROP_REGIONS) {
+    try {
+      const canvas = renderCrop(img, img.naturalWidth, img.naturalHeight, crop);
+      const png = await canvasToPngFile(canvas, "licence-crop.png");
+      const result = await html5Scanner.scanFileV2(png, false);
+      const raw = result.decodedText?.trim();
+      if (raw && raw.length >= 700) return raw;
+    } catch {
+      /* try next crop */
+    }
+  }
+  return null;
+}
+
 export async function decodeBarcodesFromVideoFrame(
   video: HTMLVideoElement,
   html5Scanner: Html5Qrcode | null,

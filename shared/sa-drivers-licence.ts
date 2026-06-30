@@ -182,10 +182,15 @@ export function isSadlEncryptedString(raw: string): boolean {
   return looksLikeSadlEncryptedString(raw);
 }
 
+/** Chunked latin1 → base64 (avoids huge single-string pressure on mobile). */
 export function sadlLatin1ToBase64(raw: string): string {
+  const chunkSize = 0x8000;
   let binary = "";
-  for (let i = 0; i < raw.length; i++) {
-    binary += String.fromCharCode(raw.charCodeAt(i) & 0xff);
+  for (let i = 0; i < raw.length; i += chunkSize) {
+    const end = Math.min(i + chunkSize, raw.length);
+    for (let j = i; j < end; j++) {
+      binary += String.fromCharCode(raw.charCodeAt(j) & 0xff);
+    }
   }
   return btoa(binary);
 }
