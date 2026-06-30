@@ -155,6 +155,7 @@ export function BarcodeScanner({
   const startedAtRef = useRef(0);
 
   const [scanning, setScanning] = useState(false);
+  const [nativeScanActive, setNativeScanActive] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoOffered, setPhotoOffered] = useState(false);
   const [showManualFallback, setShowManualFallback] = useState(false);
@@ -417,6 +418,7 @@ export function BarcodeScanner({
       setShowManualFallback(false);
       setPermissionBlocked(false);
       setPhotoBusy(false);
+      setNativeScanActive(false);
       return;
     }
 
@@ -454,8 +456,10 @@ export function BarcodeScanner({
       if (isLicenceMode && canUseNativeLicenceScanner()) {
         try {
           setScanning(true);
-          setStatus("Scanning back of card — hold steady, PDF417 on the right.");
+          setNativeScanActive(true);
+          setStatus("Native scan — point at the PDF417 on the right of the card back.");
           const result = await scanDriversLicenceNative("live");
+          setNativeScanActive(false);
           if (cancelled || settledRef.current) return;
 
           if (result.ok) {
@@ -470,6 +474,7 @@ export function BarcodeScanner({
             return;
           }
         } catch {
+          setNativeScanActive(false);
           /* fall through to ZXing */
         }
       }
@@ -491,6 +496,7 @@ export function BarcodeScanner({
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
+      setNativeScanActive(false);
       stopLiveScan();
       cleanupNativeScanOverlay();
     };
@@ -503,6 +509,32 @@ export function BarcodeScanner({
     stopLiveScan,
   ]);
 
+  // During ZXing licence fallback, periodically send frames to the server decoder.
+  useEffect(() => {
+    if (!open || !isLicenceMode || nativeScanActive || !scanning || settledRef.current) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        const video = videoRef.current;
+        if (!video || busyRef.current || settledRef.current) return;
+        try {
+          const blob = await videoFrameToBlob(video);
+          if (!blob) return;
+          const parsed = await decodeDriversLicenceFromImageViaApi(blob);
+          if (parsed?.personIdNumber || parsed?.personFullName) {
+            settleSuccess({ kind: "parsed", parsed });
+          }
+        } catch {
+          /* keep scanning */
+        }
+      })();
+    }, 2_500);
+
+    return () => window.clearInterval(interval);
+  }, [isLicenceMode, nativeScanActive, open, scanning, settleSuccess]);
+
   const closeForManualEntry = useCallback(() => {
     stopLiveScan();
     onOpenChange(false);
@@ -513,7 +545,8 @@ export function BarcodeScanner({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={`max-w-sm p-0 gap-0 overflow-hidden${isLicenceMode ? " barcode-scanner-modal" : ""}`}
+        className={`max-w-sm p-0 gap-0 overflow-hidden${isLicenceMode ? " barcode-scanner-modal" : ""}${nativeScanActive ? " bg-transparent border-transparent shadow-none" : ""}`}
+        overlayClassName={nativeScanActive ? "bg-transparent" : undefined}
         hideDefaultClose
       >
         <input
@@ -540,22 +573,33 @@ export function BarcodeScanner({
           }}
         />
 
-        <DialogHeader className="p-4 pb-2 pr-12">
+        <DialogHeader className="barcode-scanner-chrome p-4 pb-2 pr-12">
           <DialogTitle className="flex items-center gap-2 text-base">
             <ScanLine className="h-5 w-5" />
             {title}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="relative aspect-[4/3] bg-black overflow-hidden">
+        <div
+          className={`barcode-scanner-viewport relative aspect-[4/3] overflow-hidden${nativeScanActive ? " bg-transparent" : " bg-black"}`}
+        >
           <video
             ref={videoRef}
-            className="h-full w-full object-cover"
+            className={
+              nativeScanActive
+                ? "pointer-events-none absolute h-px w-px opacity-0"
+                : "h-full w-full object-cover"
+            }
             playsInline
             muted
             autoPlay
           />
-          {!scanning && !error && (
+          {nativeScanActive && (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-white/90">
+              Point at the back of the card — large PDF417 on the right
+            </div>
+          )}
+          {!scanning && !error && !nativeScanActive && (
             <div className="absolute inset-0 flex items-center justify-center text-white text-sm px-6 text-center">
               Starting camera…
             </div>
@@ -563,7 +607,7 @@ export function BarcodeScanner({
           <div className="pointer-events-none absolute inset-6 border-2 border-primary rounded-lg" />
         </div>
 
-        <div className="p-4 space-y-3">
+        <div className="barcode-scanner-chrome p-4 space-y-3">
           {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
           {status && !error && (
             <p className="text-xs text-primary font-medium">{status}</p>
