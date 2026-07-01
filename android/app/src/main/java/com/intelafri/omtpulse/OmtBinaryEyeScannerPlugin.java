@@ -41,7 +41,8 @@ public class OmtBinaryEyeScannerPlugin extends Plugin {
     private static final String RETURN_HEX_PARAM = "hex";
     private static final String RETURN_FORMAT_PARAM = "fmt";
 
-    private static final long RESUME_CANCEL_GRACE_MS = 450;
+    /** Binary Eye may take a few seconds to return via deep link after a scan — 450ms was cancelling valid scans. */
+    private static final long RESUME_CANCEL_GRACE_MS = 8_000;
 
     private PluginCall pendingDeepLinkCall;
     private boolean awaitingDeepLinkReturn;

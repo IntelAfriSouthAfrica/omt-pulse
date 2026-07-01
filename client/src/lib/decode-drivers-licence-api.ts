@@ -21,9 +21,10 @@ export async function decodeDriversLicenceViaApiFromBase64(
   payloadBase64: string,
 ): Promise<ParsedSaId | null> {
   try {
-    const dl = (await apiRequest("POST", "/api/access-control/decode-drivers-licence", {
+    const res = await apiRequest("POST", "/api/access-control/decode-drivers-licence", {
       payloadBase64,
-    })) as unknown as SaDriversLicence;
+    });
+    const dl = (await res.json()) as SaDriversLicence;
     return driversLicenceToParsedFields(dl);
   } catch {
     return null;
@@ -49,14 +50,26 @@ function blobToBase64(blob: Blob): Promise<string> {
 /** Server reads PDF417 from image (sharp + zxing) then decrypts — most reliable on Android. */
 export async function decodeDriversLicenceFromImageViaApi(
   image: Blob,
+  timeoutMs = 90_000,
 ): Promise<ParsedSaId | null> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const imageBase64 = await blobToBase64(image);
-    const dl = (await apiRequest("POST", "/api/access-control/decode-drivers-licence-image", {
-      imageBase64,
-    })) as unknown as SaDriversLicence;
+    const res = await fetch("/api/access-control/decode-drivers-licence-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64 }),
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const dl = (await res.json()) as SaDriversLicence;
     return driversLicenceToParsedFields(dl);
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timer);
   }
 }

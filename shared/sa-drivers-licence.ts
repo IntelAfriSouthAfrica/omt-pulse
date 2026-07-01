@@ -3,6 +3,8 @@
  * Ported from https://github.com/yushulx/south-africa-driving-license (MIT).
  */
 
+import { isValidSaIdNumber } from "./parse-sa-licence-front";
+
 const V1 = [0x01, 0xe1, 0x02, 0x45] as const;
 const V2 = [0x01, 0x9b, 0x09, 0x45] as const;
 
@@ -394,7 +396,13 @@ export function parseSaDriversLicenceBytes(
 
   try {
     const payload = encrypted ? decryptSadlData(bytes) : bytes;
-    return parseSadlDecrypted(payload);
+    const dl = parseSadlDecrypted(payload);
+    // A corrupted photo/barcode read can still pass the coarse 4-byte header check but
+    // decrypt to garbage. Require a Luhn-valid 13-digit ID before trusting the result —
+    // this is what lets the image-decode pipeline keep trying other crops instead of
+    // silently returning a wrong ID number.
+    if (encrypted && !isValidSaIdNumber(dl.idNumber)) return null;
+    return dl;
   } catch {
     return null;
   }

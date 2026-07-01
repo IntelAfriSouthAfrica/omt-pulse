@@ -82,9 +82,10 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 export async function readLicenceFrontFromPhoto(file: File): Promise<LicenceFrontOcrResult> {
   try {
     const imageBase64 = await compactLicencePhotoBase64(file);
-    const ocr = (await apiRequest("POST", "/api/access-control/decode-licence-front-image", {
+    const res = await apiRequest("POST", "/api/access-control/decode-licence-front-image", {
       imageBase64,
-    })) as ParsedLicenceFrontOcr;
+    });
+    const ocr = (await res.json()) as ParsedLicenceFrontOcr;
 
     const parsed = toParsedSaId(ocr);
     if (parsed?.personIdNumber || parsed?.personFullName) {

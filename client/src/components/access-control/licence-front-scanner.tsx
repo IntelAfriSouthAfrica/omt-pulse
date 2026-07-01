@@ -107,8 +107,9 @@ export function LicenceFrontScanner({
       if (binaryEye.reason === "cancelled") {
         toast({
           title: "Scan cancelled",
-          description: "Tap Scan licence again, or take a photo of the back of the card.",
+          description: "Tap Scan licence again, or use Photo of front for name + ID.",
         });
+        onOpenChange(true);
         return;
       }
 
@@ -137,7 +138,11 @@ export function LicenceFrontScanner({
       await waitForDialogToClose();
 
       const toastTitle = kind === "front" ? "Reading front of card…" : "Reading back barcode…";
-      toast({ title: toastTitle, description: "This may take a few seconds." });
+      const toastDescription =
+        kind === "back"
+          ? "Up to about a minute — hold steady with the PDF417 on the right in bright light."
+          : "This may take up to half a minute.";
+      toast({ title: toastTitle, description: toastDescription });
 
       try {
         if (kind === "back") {
@@ -149,7 +154,7 @@ export function LicenceFrontScanner({
           toast({
             title: "No barcode in photo",
             description:
-              "Fill the frame with the back of the card, PDF417 on the right, bright light. Or try Photo of front.",
+              "Fill the frame with the back of the card, PDF417 barcode on the right, bright light, minimal glare. Or use Photo of front for name + ID.",
             variant: "destructive",
           });
         } else {

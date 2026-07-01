@@ -8,7 +8,7 @@ import {
   type ReaderOptions,
 } from "zxing-wasm/reader";
 import { findSadl720InBuffer, latin1BytesFromText } from "./extract-sadl-payload";
-import { isSadlEncryptedPayload } from "./sa-drivers-licence";
+import { isSadlEncryptedPayload, parseSaDriversLicenceBytes } from "./sa-drivers-licence";
 
 type CropRegion = { x: number; y: number; w: number; h: number };
 
@@ -45,6 +45,8 @@ const READER_OPTIONS: ReaderOptions = {
 
 const MAX_DECODE_WIDTH = 3200;
 const MIN_UPSCALE_WIDTH = 1600;
+/** Stop exhaustive PDF417 search after this — phone uploads must not hang for minutes. */
+export const DEFAULT_SADL_IMAGE_DECODE_BUDGET_MS = 55_000;
 
 let wasmConfigured = false;
 let wasmLoadError: string | null = null;
@@ -128,32 +130,67 @@ type ZxingReadResult = {
   bytes?: Uint8Array;
 };
 
-function sadlFromZxingResults(results: ZxingReadResult[]): Uint8Array | null {
+/** True Reed-Solomon-verified success is not enough — plastic-sleeve glare can produce a
+ * buffer that coincidentally matches the 4-byte SADL header but decrypts to garbage. Only
+ * a Luhn-valid decrypted ID number proves the read was actually correct, so the search
+ * keeps trying other crops/rotations/preprocess modes until it finds one, remembering the
+ * first structural (unverified) match purely as a last-resort fallback. */
+class BestSadlCandidate {
+  verified: Uint8Array | null = null;
+  fallback: Uint8Array | null = null;
+
+  constructor(private readonly deadline: number) {}
+
+  consider(bytes: Uint8Array): void {
+    if (this.verified) return;
+    if (!this.fallback) this.fallback = bytes;
+    if (parseSaDriversLicenceBytes(bytes, true)) this.verified = bytes;
+  }
+
+  get done(): boolean {
+    return this.verified !== null;
+  }
+
+  get timedOut(): boolean {
+    return Date.now() >= this.deadline;
+  }
+
+  shouldStop(): boolean {
+    return this.done || this.timedOut;
+  }
+
+  get result(): Uint8Array | null {
+    return this.verified ?? this.fallback;
+  }
+}
+
+function sadlCandidatesFromZxingResults(results: ZxingReadResult[]): Uint8Array[] {
+  const found: Uint8Array[] = [];
   for (const result of results) {
     if (result.bytes?.length) {
-      const found = findSadl720InBuffer(result.bytes);
-      if (found) return found;
+      const hit = findSadl720InBuffer(result.bytes);
+      if (hit) found.push(hit);
     }
 
     const text = result.text ?? "";
     if (text.length >= 700) {
       const latin1 = latin1BytesFromText(text);
       if (latin1) {
-        const found = findSadl720InBuffer(latin1);
-        if (found) return found;
+        const hit = findSadl720InBuffer(latin1);
+        if (hit) found.push(hit);
       }
     }
   }
-  return null;
+  return found;
 }
 
-async function readPdf417FromBuffer(imageBuffer: Buffer): Promise<Uint8Array | null> {
-  if (wasmLoadError) return null;
+async function readPdf417CandidatesFromBuffer(imageBuffer: Buffer): Promise<Uint8Array[]> {
+  if (wasmLoadError) return [];
   try {
     const results = await readBarcodes(imageBuffer, READER_OPTIONS);
-    return sadlFromZxingResults(results);
+    return sadlCandidatesFromZxingResults(results);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -209,11 +246,15 @@ async function rgbaForCrop(
   };
 }
 
-async function decodeCropJpeg(imageBuffer: Buffer, crop: CropRegion): Promise<Uint8Array | null> {
+async function decodeCropJpeg(
+  imageBuffer: Buffer,
+  crop: CropRegion,
+  best: BestSadlCandidate,
+): Promise<void> {
   const meta = await sharp(imageBuffer).metadata();
   const fullW = meta.width ?? 0;
   const fullH = meta.height ?? 0;
-  if (fullW < 4 || fullH < 4) return null;
+  if (fullW < 4 || fullH < 4) return;
 
   const left = Math.min(fullW - 1, Math.max(0, Math.floor(fullW * crop.x)));
   const top = Math.min(fullH - 1, Math.max(0, Math.floor(fullH * crop.y)));
@@ -226,6 +267,7 @@ async function decodeCropJpeg(imageBuffer: Buffer, crop: CropRegion): Promise<Ui
   );
 
   for (const mode of ["grayscale", "high_contrast", "linear", "gamma", "threshold"] as const) {
+    if (best.shouldStop()) return;
     try {
       let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
       if (width < targetWidth) {
@@ -238,17 +280,21 @@ async function decodeCropJpeg(imageBuffer: Buffer, crop: CropRegion): Promise<Ui
       else pipeline = pipeline.grayscale().normalize().median(1).threshold(132);
 
       const jpeg = await pipeline.jpeg({ quality: 98, mozjpeg: true }).toBuffer();
-      const sadl = await readPdf417FromBuffer(jpeg);
-      if (sadl) return sadl;
+      const candidates = await readPdf417CandidatesFromBuffer(jpeg);
+      for (const candidate of candidates) best.consider(candidate);
     } catch {
       /* next mode */
     }
   }
-  return null;
 }
 
-async function decodeCropRgba(imageBuffer: Buffer, crop: CropRegion): Promise<Uint8Array | null> {
+async function decodeCropRgba(
+  imageBuffer: Buffer,
+  crop: CropRegion,
+  best: BestSadlCandidate,
+): Promise<void> {
   for (const mode of PREPROCESS_MODES) {
+    if (best.shouldStop()) return;
     try {
       const rgba = await rgbaForCrop(imageBuffer, crop, mode);
       if (!rgba) continue;
@@ -257,22 +303,34 @@ async function decodeCropRgba(imageBuffer: Buffer, crop: CropRegion): Promise<Ui
         { data: rgba.data, width: rgba.width, height: rgba.height },
         READER_OPTIONS,
       );
-      const sadl = sadlFromZxingResults(results);
-      if (sadl) return sadl;
+      for (const candidate of sadlCandidatesFromZxingResults(results)) best.consider(candidate);
     } catch {
       /* try next mode */
     }
   }
-  return null;
 }
 
-async function decodeCrop(imageBuffer: Buffer, crop: CropRegion): Promise<Uint8Array | null> {
-  const fromJpeg = await decodeCropJpeg(imageBuffer, crop);
-  if (fromJpeg) return fromJpeg;
-  return decodeCropRgba(imageBuffer, crop);
+async function decodeCrop(
+  imageBuffer: Buffer,
+  crop: CropRegion,
+  best: BestSadlCandidate,
+): Promise<void> {
+  await decodeCropJpeg(imageBuffer, crop, best);
+  if (best.shouldStop()) return;
+  await decodeCropRgba(imageBuffer, crop, best);
 }
 
-async function decodeOrientedBuffer(working: Buffer): Promise<Uint8Array | null> {
+async function decodeOrientedBuffer(working: Buffer, best: BestSadlCandidate): Promise<void> {
+  // SA licence PDF417 sits on the right — try tight crops before the expensive full-frame pass.
+  for (const crop of CROP_REGIONS.slice(0, 2)) {
+    if (best.shouldStop()) return;
+    try {
+      await decodeCrop(working, crop, best);
+    } catch {
+      /* next crop */
+    }
+  }
+
   const fullJpeg = await sharp(working)
     .resize({
       width: MAX_DECODE_WIDTH,
@@ -283,37 +341,58 @@ async function decodeOrientedBuffer(working: Buffer): Promise<Uint8Array | null>
     .toBuffer()
     .catch(() => null);
   if (fullJpeg) {
-    const fromFull = await readPdf417FromBuffer(fullJpeg);
-    if (fromFull) return fromFull;
+    for (const candidate of await readPdf417CandidatesFromBuffer(fullJpeg)) best.consider(candidate);
+    if (best.shouldStop()) return;
   }
 
-  const direct = await readPdf417FromBuffer(working);
-  if (direct) return direct;
+  for (const candidate of await readPdf417CandidatesFromBuffer(working)) best.consider(candidate);
+  if (best.shouldStop()) return;
 
-  for (const crop of CROP_REGIONS) {
+  for (const crop of CROP_REGIONS.slice(2)) {
+    if (best.shouldStop()) return;
     try {
-      const bytes = await decodeCrop(working, crop);
-      if (bytes) return bytes;
+      await decodeCrop(working, crop, best);
     } catch {
       /* next crop */
     }
   }
+}
 
-  return null;
+/** Shrink huge phone photos before decode — 2MB+ uploads were taking many minutes. */
+async function prepareImageBuffer(imageBuffer: Buffer): Promise<Buffer> {
+  const meta = await sharp(imageBuffer).metadata();
+  const w = meta.width ?? 0;
+  if (imageBuffer.length <= 1_800_000 && w > 0 && w <= 3500) {
+    return sharp(imageBuffer).rotate().toBuffer();
+  }
+  return sharp(imageBuffer)
+    .rotate()
+    .resize({
+      width: Math.min(MAX_DECODE_WIDTH, w > 0 ? w : MAX_DECODE_WIDTH),
+      withoutEnlargement: true,
+      kernel: sharp.kernel.lanczos3,
+    })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
 }
 
 /** Extract the 720-byte encrypted SADL payload from a JPEG/PNG/WebP image buffer. */
 export async function decodeSadlBytesFromImageBuffer(
   imageBuffer: Buffer,
+  timeBudgetMs = DEFAULT_SADL_IMAGE_DECODE_BUDGET_MS,
 ): Promise<Uint8Array | null> {
   ensureZxingWasm();
   if (wasmLoadError) {
     throw new Error(wasmLoadError);
   }
 
-  const oriented = await sharp(imageBuffer).rotate().toBuffer();
+  const startedAt = Date.now();
+  const deadline = startedAt + timeBudgetMs;
+  const oriented = await prepareImageBuffer(imageBuffer);
+  const best = new BestSadlCandidate(deadline);
 
   for (const rot of ROTATIONS) {
+    if (best.shouldStop()) break;
     let working = oriented;
     if (rot !== 0) {
       try {
@@ -323,16 +402,21 @@ export async function decodeSadlBytesFromImageBuffer(
       }
     }
 
-    const bytes = await decodeOrientedBuffer(working);
-    if (bytes) return bytes;
+    await decodeOrientedBuffer(working, best);
   }
 
-  return null;
+  if (best.timedOut && !best.verified) {
+    console.warn(`[sadl-image] timed out after ${Date.now() - startedAt}ms (budget=${timeBudgetMs})`);
+  }
+
+  // Only return decrypt-verified payloads — never a coincidental header match.
+  return best.verified;
 }
 
 /** @internal test helper */
 export function sadlBytesFromZxingResultsForTest(results: ZxingReadResult[]): Uint8Array | null {
-  return sadlFromZxingResults(results);
+  const candidates = sadlCandidatesFromZxingResults(results);
+  return candidates[0] ?? null;
 }
 
 export function looksLikeSadlPayload(bytes: Uint8Array): boolean {
