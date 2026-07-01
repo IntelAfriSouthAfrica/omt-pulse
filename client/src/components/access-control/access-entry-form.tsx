@@ -221,7 +221,7 @@ export function AccessEntryForm({ destinations, onCreated }: AccessEntryFormProp
         </div>
         <p className="text-xs text-muted-foreground -mt-1">
           <span className="font-medium">Scan ID</span> for Smart ID or ID book.{" "}
-          <span className="font-medium">Scan licence</span> — photograph the front of the driver&apos;s licence (works through plastic).
+          <span className="font-medium">Scan licence</span> — live barcode scan or photo of the back; front of card if needed.
         </p>
         {licenceScanNote && (
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/40 px-3 py-2">

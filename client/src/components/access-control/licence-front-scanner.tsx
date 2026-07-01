@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -7,9 +7,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Camera, ImageIcon, ScanLine, X } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import type { AccessIdentityScanResult, ParsedSaId } from "@/lib/parse-sa-barcodes";
 import { readLicenceFrontFromPhoto } from "@/lib/licence-front-ocr";
-import { decodeDriversLicenceFromImageViaApi } from "@/lib/decode-drivers-licence-api";
+import {
+  canUseNativeLicenceScanner,
+  decodeLicenceBarcodeFromPhoto,
+  scanDriversLicenceNative,
+} from "@/lib/native-licence-barcode";
 import { APP_CACHE_VERSION } from "@shared/cache-version";
 
 type LicenceFrontScannerProps = {
@@ -26,20 +31,23 @@ export function LicenceFrontScanner({
   onOpenChange,
   onScan,
 }: LicenceFrontScannerProps) {
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const galleryInputRef = useRef<HTMLInputElement>(null);
-  const backBarcodeInputRef = useRef<HTMLInputElement>(null);
+  const backCameraRef = useRef<HTMLInputElement>(null);
+  const backGalleryRef = useRef<HTMLInputElement>(null);
+  const frontCameraRef = useRef<HTMLInputElement>(null);
+  const frontGalleryRef = useRef<HTMLInputElement>(null);
+  const autoScanStartedRef = useRef(false);
 
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showBackBarcode, setShowBackBarcode] = useState(false);
+  const [showFrontOcr, setShowFrontOcr] = useState(false);
 
   const reset = useCallback(() => {
     setBusy(false);
     setStatus(null);
     setError(null);
-    setShowBackBarcode(false);
+    setShowFrontOcr(false);
+    autoScanStartedRef.current = false;
   }, []);
 
   const settle = useCallback(
@@ -51,46 +59,79 @@ export function LicenceFrontScanner({
     [onOpenChange, onScan, reset],
   );
 
-  const readFrontPhoto = useCallback(
-    async (file: File) => {
-      setBusy(true);
-      setError(null);
-      setStatus("Reading text from photo…");
+  const runLiveBarcodeScan = useCallback(async () => {
+    if (!canUseNativeLicenceScanner() || busy) return;
+    setBusy(true);
+    setError(null);
+    setStatus("Opening barcode scanner — point at the PDF417 on the back of the card…");
 
-      const result = await readLicenceFrontFromPhoto(file);
-      if (result.ok) {
-        setStatus("Details captured");
-        settle(result.parsed);
-        return;
-      }
+    const result = await scanDriversLicenceNative("google");
+    if (result.ok) {
+      setStatus("Licence captured");
+      settle(result.parsed);
+      return;
+    }
 
-      setError(result.message);
-      setStatus(null);
-      setBusy(false);
-    },
-    [settle],
-  );
+    setBusy(false);
+    if (result.reason === "cancelled") {
+      setStatus("Scan cancelled — take a photo of the back barcode or try again.");
+      return;
+    }
+
+    setStatus(null);
+    setError(
+      "Could not read the barcode. Take a clear photo of the back of the card (PDF417 on the right), or try the front of the card.",
+    );
+  }, [busy, settle]);
 
   const readBackBarcodePhoto = useCallback(
     async (file: File) => {
       setBusy(true);
       setError(null);
-      setStatus("Reading barcode on back of card…");
+      setStatus("Reading PDF417 from photo…");
 
-      try {
+      if (canUseNativeLicenceScanner()) {
+        const native = await decodeLicenceBarcodeFromPhoto(file);
+        if (native.ok) {
+          setStatus("Licence barcode read");
+          settle(native.parsed);
+          return;
+        }
+      } else {
+        const { decodeDriversLicenceFromImageViaApi } = await import(
+          "@/lib/decode-drivers-licence-api"
+        );
         const parsed = await decodeDriversLicenceFromImageViaApi(file);
         if (parsed?.personIdNumber || parsed?.personFullName) {
           setStatus("Licence barcode read");
           settle(parsed);
           return;
         }
-      } catch {
-        /* fall through */
       }
 
       setError(
-        "Could not read the back barcode. Photograph the front of the licence instead, or type details on the form.",
+        "No barcode found in this photo. Fill the frame with the back of the card, PDF417 on the right, good light, then try again.",
       );
+      setStatus(null);
+      setBusy(false);
+    },
+    [settle],
+  );
+
+  const readFrontPhoto = useCallback(
+    async (file: File) => {
+      setBusy(true);
+      setError(null);
+      setStatus("Reading text from front of card…");
+
+      const result = await readLicenceFrontFromPhoto(file);
+      if (result.ok) {
+        setStatus("Details captured from front");
+        settle(result.parsed);
+        return;
+      }
+
+      setError(result.message);
       setStatus(null);
       setBusy(false);
     },
@@ -105,34 +146,21 @@ export function LicenceFrontScanner({
     [onOpenChange, reset],
   );
 
+  useEffect(() => {
+    if (!open) return;
+
+    reset();
+    if (Capacitor.isNativePlatform() && canUseNativeLicenceScanner() && !autoScanStartedRef.current) {
+      autoScanStartedRef.current = true;
+      void runLiveBarcodeScan();
+    }
+  }, [open, reset, runLiveBarcodeScan]);
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden" hideDefaultClose>
         <input
-          ref={cameraInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className={FILE_INPUT_CLASS}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void readFrontPhoto(file);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={galleryInputRef}
-          type="file"
-          accept="image/*"
-          className={FILE_INPUT_CLASS}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void readFrontPhoto(file);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={backBarcodeInputRef}
+          ref={backCameraRef}
           type="file"
           accept="image/*"
           capture="environment"
@@ -143,25 +171,56 @@ export function LicenceFrontScanner({
             e.target.value = "";
           }}
         />
+        <input
+          ref={backGalleryRef}
+          type="file"
+          accept="image/*"
+          className={FILE_INPUT_CLASS}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void readBackBarcodePhoto(file);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={frontCameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className={FILE_INPUT_CLASS}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void readFrontPhoto(file);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={frontGalleryRef}
+          type="file"
+          accept="image/*"
+          className={FILE_INPUT_CLASS}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void readFrontPhoto(file);
+            e.target.value = "";
+          }}
+        />
 
         <DialogHeader className="p-4 pb-2 pr-12">
           <DialogTitle className="flex items-center gap-2 text-base">
             <ScanLine className="h-5 w-5" />
-            Photograph driver&apos;s licence
+            Scan driver&apos;s licence
           </DialogTitle>
         </DialogHeader>
 
         <div className="mx-4 mb-2 flex aspect-[4/3] items-center justify-center rounded-lg border-2 border-dashed border-primary/40 bg-muted/30 px-4 text-center">
           <p className="text-sm text-muted-foreground">
-            Photograph the <strong>front</strong> of the card — name and ID number visible through the plastic sleeve.
+            Point at the <strong>back</strong> of the card — large <strong>PDF417 on the right</strong>.
+            Works through plastic covers ({APP_CACHE_VERSION}).
           </p>
         </div>
 
         <div className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Good light, hold steady, fill the frame ({APP_CACHE_VERSION}). Works with plastic covers.
-          </p>
-
           {status && !error && (
             <p className="text-xs text-primary font-medium">{status}</p>
           )}
@@ -171,50 +230,75 @@ export function LicenceFrontScanner({
             </p>
           )}
 
-          <div className="flex gap-2">
+          {canUseNativeLicenceScanner() && (
             <Button
               type="button"
               variant="default"
+              className="w-full"
+              disabled={busy}
+              onClick={() => void runLiveBarcodeScan()}
+            >
+              <ScanLine className="h-4 w-4 mr-1" />
+              {busy ? "Scanning…" : "Scan barcode (live)"}
+            </Button>
+          )}
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={canUseNativeLicenceScanner() ? "outline" : "default"}
               className="flex-1"
               disabled={busy}
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => backCameraRef.current?.click()}
             >
               <Camera className="h-4 w-4 mr-1" />
-              {busy ? "Reading…" : "Take photo"}
+              Photo of back
             </Button>
             <Button
               type="button"
               variant="outline"
               className="flex-1"
               disabled={busy}
-              onClick={() => galleryInputRef.current?.click()}
+              onClick={() => backGalleryRef.current?.click()}
             >
               <ImageIcon className="h-4 w-4 mr-1" />
               Gallery
             </Button>
           </div>
 
-          {!showBackBarcode ? (
+          {!showFrontOcr ? (
             <Button
               type="button"
               variant="ghost"
               className="w-full text-xs"
               disabled={busy}
-              onClick={() => setShowBackBarcode(true)}
+              onClick={() => setShowFrontOcr(true)}
             >
-              Try back barcode instead
+              Try front of card instead (read name &amp; ID)
             </Button>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full text-xs"
-              disabled={busy}
-              onClick={() => backBarcodeInputRef.current?.click()}
-            >
-              <Camera className="h-4 w-4 mr-1" />
-              Photo of back barcode
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 text-xs"
+                disabled={busy}
+                onClick={() => frontCameraRef.current?.click()}
+              >
+                <Camera className="h-4 w-4 mr-1" />
+                Photo of front
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 text-xs"
+                disabled={busy}
+                onClick={() => frontGalleryRef.current?.click()}
+              >
+                <ImageIcon className="h-4 w-4 mr-1" />
+                Front gallery
+              </Button>
+            </div>
           )}
 
           <div className="flex gap-2">
