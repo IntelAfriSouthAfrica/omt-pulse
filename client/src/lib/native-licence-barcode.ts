@@ -5,6 +5,7 @@ import {
   looksLikeSadlEncryptedString,
 } from "@shared/sa-drivers-licence";
 import {
+  decodeDriversLicenceFromImageViaApi,
   decodeDriversLicenceViaApiFromBase64,
 } from "@/lib/decode-drivers-licence-api";
 import type { ParsedSaId } from "@/lib/parse-sa-barcodes";
@@ -237,10 +238,74 @@ export async function stopNativeDriversLicenceScan(): Promise<void> {
   }
 }
 
+export async function decodeLicenceBarcodeFromPhoto(
+  file: File,
+): Promise<NativeLicenceScanResult> {
+  if (!canUseNativeLicenceScanner()) {
+    return { ok: false, reason: "unsupported" };
+  }
+
+  const { BarcodeScanner, BarcodeFormat } = await loadMlKit();
+
+  try {
+    let barcodes: MlKitBarcode[] = [];
+
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result ?? "");
+          resolve(dataUrl.includes(",") ? dataUrl.split(",")[1]! : dataUrl);
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("Could not read image"));
+        reader.readAsDataURL(file);
+      });
+
+      const tempName = `sadl-${Date.now()}.jpg`;
+      const written = await Filesystem.writeFile({
+        path: tempName,
+        data: base64,
+        directory: Directory.Cache,
+      });
+
+      const result = await BarcodeScanner.readBarcodesFromImage({
+        path: written.uri,
+        formats: [BarcodeFormat.Pdf417],
+      });
+      barcodes = (result.barcodes ?? []) as MlKitBarcode[];
+    } catch (err) {
+      console.warn(
+        "[mlkit-licence] readBarcodesFromImage failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    for (const bc of barcodes) {
+      const parsed = await decodeBarcode(bc);
+      if (parsed?.personIdNumber || parsed?.personFullName) {
+        return { ok: true, parsed };
+      }
+    }
+  } catch {
+    /* try server */
+  }
+
+  try {
+    const parsed = await decodeDriversLicenceFromImageViaApi(file);
+    if (parsed?.personIdNumber || parsed?.personFullName) {
+      return { ok: true, parsed };
+    }
+  } catch {
+    /* fall through */
+  }
+
+  return { ok: false, reason: "no_barcode" };
+}
+
 /**
- * Live native scan for SA driver's licence PDF417.
- * mode "google" — full-screen Google scanner UI.
- * mode "live" / "auto" — ML Kit camera behind WebView (never opens Google UI).
+ * Binary Eye-style: full-screen live PDF417 scan, then optional photo decode.
+ * mode "google" — dedicated scanner UI (closest to Binary Eye live scan).
  */
 export async function scanDriversLicenceNative(
   mode: "auto" | "google" | "live" = "auto",

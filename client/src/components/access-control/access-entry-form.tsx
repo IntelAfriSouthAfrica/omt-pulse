@@ -20,6 +20,7 @@ import { ACCESS_CATEGORY_LABELS } from "@/lib/access-control-labels";
 import { currentlyInsideQueryKey } from "@/lib/access-control-queries";
 import { parseSaIdentityScan, parseSaVehicleDiscBarcode } from "@/lib/parse-sa-barcodes";
 import { BarcodeScanner } from "@/components/access-control/barcode-scanner";
+import { LicenceFrontScanner } from "@/components/access-control/licence-front-scanner";
 import { Camera, Car, Loader2, ScanLine, User } from "lucide-react";
 import type { Destination } from "@shared/schema";
 
@@ -220,7 +221,7 @@ export function AccessEntryForm({ destinations, onCreated }: AccessEntryFormProp
         </div>
         <p className="text-xs text-muted-foreground -mt-1">
           <span className="font-medium">Scan ID</span> for Smart ID or ID book.{" "}
-          <span className="font-medium">Scan licence</span> for driver&apos;s licence — live scan first, photo only if needed.
+          <span className="font-medium">Scan licence</span> — live barcode scan or photo of the back; front of card if needed.
         </p>
         {licenceScanNote && (
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/40 px-3 py-2">
@@ -382,17 +383,17 @@ export function AccessEntryForm({ destinations, onCreated }: AccessEntryFormProp
       </Button>
 
       <BarcodeScanner
-        open={scanTarget !== null}
-        onOpenChange={(o) => { if (!o) setScanTarget(null); }}
+        open={scanTarget !== null && scanTarget !== "drivers_licence"}
+        onOpenChange={(o) => {
+          if (!o) setScanTarget(null);
+        }}
         title={
           scanTarget === "disc"
             ? "Scan licence disc"
-            : scanTarget === "drivers_licence"
-              ? "Scan driver's licence"
-              : "Scan ID"
+            : "Scan ID"
         }
         scanKind={scanTarget === "disc" ? "disc" : "id"}
-        identityMode={scanTarget === "drivers_licence" ? "drivers_licence" : "national_id"}
+        identityMode="national_id"
         onScan={(result) => {
           if (scanTarget === "disc") {
             const value = typeof result === "string" ? result : result.kind === "raw" ? result.value : "";
@@ -417,18 +418,33 @@ export function AccessEntryForm({ destinations, onCreated }: AccessEntryFormProp
                 : parseSaIdentityScan(typeof result === "string" ? result : result.value);
             if (parsed.personFullName) setPersonFullName(parsed.personFullName);
             if (parsed.personIdNumber) setPersonIdNumber(parsed.personIdNumber);
-            const note = buildLicenceNote(parsed);
-            setLicenceScanNote(parsed.documentType === "drivers_licence" ? note : null);
+            setLicenceScanNote(null);
             if (parsed.hint) {
               toast({ title: "ID scan", description: parsed.hint });
-            } else if (parsed.documentType === "drivers_licence") {
-              toast({
-                title: "Driver's licence captured",
-                description: note ?? parsed.personFullName ?? "Details filled in",
-              });
             } else if (parsed.personFullName) {
               toast({ title: "ID captured", description: parsed.personFullName });
             }
+          }
+        }}
+      />
+
+      <LicenceFrontScanner
+        open={scanTarget === "drivers_licence"}
+        onOpenChange={(o) => {
+          if (!o) setScanTarget(null);
+        }}
+        onScan={({ parsed }) => {
+          if (parsed.personFullName) setPersonFullName(parsed.personFullName);
+          if (parsed.personIdNumber) setPersonIdNumber(parsed.personIdNumber);
+          const note = buildLicenceNote(parsed);
+          setLicenceScanNote(note);
+          if (parsed.hint) {
+            toast({ title: "Driver's licence photo", description: parsed.hint });
+          } else {
+            toast({
+              title: "Driver's licence captured",
+              description: note ?? parsed.personFullName ?? parsed.personIdNumber ?? "Details filled in",
+            });
           }
         }}
       />
