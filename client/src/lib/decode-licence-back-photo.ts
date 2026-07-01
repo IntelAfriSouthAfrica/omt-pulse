@@ -60,22 +60,16 @@ async function decodeBytesOnDevice(file: Blob): Promise<ParsedSaId | null> {
 
 /**
  * Decode a photo of the back of a SA driver's licence.
- * Tries on-device ZXing first (fast, no upload), then server zxing-cpp on the original + enhanced photo.
+ * Tries on-device ZXing first (fast, no upload), then one server pass on the enhanced photo.
  */
 export async function decodeLicenceBackFromPhoto(file: File): Promise<ParsedSaId | null> {
-  const attempts: Blob[] = [file];
   const enhanced = await enhancedPhotoBlob(file);
-  if (enhanced !== file) attempts.push(enhanced);
 
-  for (const attempt of attempts) {
+  for (const attempt of [file, enhanced]) {
     const parsed = await decodeBytesOnDevice(attempt);
     if (parsed?.personIdNumber || parsed?.personFullName) return parsed;
   }
 
-  for (const attempt of attempts) {
-    const parsed = await decodeDriversLicenceFromImageViaApi(attempt);
-    if (parsed?.personIdNumber || parsed?.personFullName) return parsed;
-  }
-
-  return null;
+  // One server upload only — duplicate uploads were each taking many minutes when decode failed.
+  return decodeDriversLicenceFromImageViaApi(enhanced);
 }

@@ -1,5 +1,12 @@
 import sharp from "sharp";
-import { parseSaLicenceFrontOcr, type ParsedLicenceFrontOcr } from "@shared/parse-sa-licence-front";
+import {
+  extractBirthDateYymmddFromOcrText,
+  idPrefixMatchesBirthDate,
+  isPlausibleLicencePersonName,
+  isPlausibleSaIdBirthDate,
+  parseSaLicenceFrontOcr,
+  type ParsedLicenceFrontOcr,
+} from "@shared/parse-sa-licence-front";
 
 type OcrWorker = {
   setParameters: (params: Record<string, string>) => Promise<unknown>;
@@ -107,10 +114,29 @@ function preprocessSteps(oriented: Buffer): PreprocessStep[] {
 
 function scoreResult(parsed: ParsedLicenceFrontOcr): number {
   let score = 0;
-  if (parsed.personIdNumber) score += 100;
-  if (parsed.personFullName) score += 40;
+  if (parsed.personIdNumber) {
+    score += 100;
+    if (isPlausibleSaIdBirthDate(parsed.personIdNumber)) score += 80;
+  }
+  if (parsed.personFullName) {
+    const n = parsed.personFullName.toUpperCase();
+    if (!/CONDUC|CARTA|LICEN|DRIV|AFRICA|REPUBLIC/.test(n)) score += 40;
+    else score -= 50;
+  }
   if (parsed.driversLicenceNumber) score += 10;
   return score;
+}
+
+function isGoodEnough(parsed: ParsedLicenceFrontOcr, ocrText: string): boolean {
+  if (!parsed.personIdNumber || !isPlausibleSaIdBirthDate(parsed.personIdNumber)) return false;
+  if (!parsed.personFullName || !isPlausibleLicencePersonName(parsed.personFullName)) return false;
+
+  const birthYymmdd = extractBirthDateYymmddFromOcrText(ocrText);
+  if (birthYymmdd && !idPrefixMatchesBirthDate(parsed.personIdNumber, birthYymmdd)) return false;
+
+  const n = parsed.personFullName.toUpperCase();
+  if (/CONDUC|CARTA|LICEN|DRIV|AFRICA|REPUBLIC|MALE|FEMALE/.test(n)) return false;
+  return true;
 }
 
 /** OCR the front of a SA driver's licence on the server (avoids crashing mobile WebViews). */
@@ -123,6 +149,17 @@ export async function decodeLicenceFrontFromImageBuffer(
   let best: ParsedLicenceFrontOcr | null = null;
   let bestScore = 0;
   let bestTextSnippet = "";
+  let winningTextSnippet = "";
+
+  // A Luhn-valid, birthdate-plausible ID can still be a coincidental misread (13 digits give
+  // ~1000x odds against random noise, but noisy card text isn't random). Require the SAME ID to
+  // show up from at least two independently preprocessed copies of the photo before trusting it —
+  // real digits survive different contrast/sharpen passes; a stray sliding-window artifact usually
+  // won't reproduce identically.
+  const idCandidates = new Map<
+    string,
+    { votes: number; score: number; parsed: ParsedLicenceFrontOcr; text: string }
+  >();
 
   for (const step of preprocessSteps(oriented)) {
     let png: Buffer;
@@ -142,8 +179,23 @@ export async function decodeLicenceFrontFromImageBuffer(
           best = parsed;
           bestTextSnippet = text.replace(/\s+/g, " ").trim().slice(0, 120);
         }
-        if (parsed.personIdNumber && parsed.personFullName) {
-          return parsed;
+
+        if (isGoodEnough(parsed, text) && parsed.personIdNumber) {
+          const id = parsed.personIdNumber;
+          const existing = idCandidates.get(id);
+          const votes = (existing?.votes ?? 0) + 1;
+          if (!existing || score >= existing.score) {
+            idCandidates.set(id, { votes, score, parsed, text });
+          } else {
+            idCandidates.set(id, { ...existing, votes });
+          }
+
+          if (votes >= 2) {
+            console.log(
+              `[licence-front-ocr] confirmed id after ${votes} agreeing reads — snippet="${text.replace(/\s+/g, " ").trim().slice(0, 160)}"`,
+            );
+            return parsed;
+          }
         }
       } catch {
         /* try next */
@@ -151,7 +203,21 @@ export async function decodeLicenceFrontFromImageBuffer(
     }
   }
 
+  // No ID got a second independent match — fall back to the best-scoring single-source hit,
+  // but flag it as unconfirmed in the logs so a wrong ID here is easy to trace back.
+  if (idCandidates.size > 0) {
+    const topCandidate = [...idCandidates.values()].sort((a, b) => b.score - a.score)[0]!;
+    winningTextSnippet = topCandidate.text.replace(/\s+/g, " ").trim().slice(0, 160);
+    console.warn(
+      `[licence-front-ocr] single-source id (no second match) — id=${topCandidate.parsed.personIdNumber} snippet="${winningTextSnippet}"`,
+    );
+    return topCandidate.parsed;
+  }
+
   if (best?.personIdNumber || best?.personFullName) {
+    console.warn(
+      `[licence-front-ocr] returning best-effort (below good-enough bar) — snippet="${bestTextSnippet}"`,
+    );
     return best;
   }
 
